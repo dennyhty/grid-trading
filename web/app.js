@@ -1,0 +1,472 @@
+/* 交易訊號網頁。資料都來自本機 signal_server.py 的 /api/*，伺服器再去抓派網公開行情。 */
+"use strict";
+
+const TZ = "Asia/Taipei";
+const TZ_SHIFT = 8 * 3600; // 圖表用 UTC+8 顯示
+const INTERVAL_SEC = { "15M": 900, "30M": 1800, "60M": 3600, "4H": 14400, "8H": 28800, "12H": 43200, "1D": 86400 };
+const LABEL = { "60M": "1H" };
+const KIND_TEXT = { TP1: "TP1 觸及", TP2: "TP2 觸及", TP3: "TP3 觸及", STOP_MOVED: "保護止損移動",
+  SL: "止損出場", BE_EXIT: "保本出場", PROTECT_EXIT: "保護止損出場", TIMEOUT: "逾時平倉", NEW: "新訊號" };
+
+let state = null;
+let tab = "OPEN";
+let current = null;          // 目前打開的訊號
+let chart = null, candleSeries = null, emaSeries = {}, priceLines = [];
+let chartData = null;
+let live = false;
+let notified = null;         // 已經跳過瀏覽器通知的 id
+const $ = (id) => document.getElementById(id);
+
+// ---------- 格式 ----------
+const pair = (sym) => sym.replace("_USDT_PERP", "/USDT");
+const lbl = (iv) => LABEL[iv] || iv;
+function fmtTime(ms, withSec = true) {
+  const d = new Date(ms);
+  const p = new Intl.DateTimeFormat("zh-TW", { timeZone: TZ, year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit", second: withSec ? "2-digit" : undefined, hour12: false }).formatToParts(d);
+  const g = (t) => (p.find((x) => x.type === t) || {}).value;
+  return `${g("year")}/${g("month")}/${g("day")} ${g("hour")}:${g("minute")}${withSec ? ":" + g("second") : ""}`;
+}
+function fmtShort(ms) { return fmtTime(ms, false).slice(5); }
+function decimals(p) {
+  if (!p) return 2;
+  const a = Math.abs(p);
+  return a >= 1000 ? 2 : a >= 10 ? 3 : a >= 1 ? 4 : Math.min(8, Math.ceil(-Math.log10(a)) + 3);
+}
+const fp = (p, ref) => (p == null ? "—" : Number(p).toFixed(decimals(ref ?? p)));
+const pct = (x) => (x == null ? "—" : `${x >= 0 ? "+" : ""}${x.toFixed(2)}%`);
+function ago(ms) {
+  const m = (Date.now() - ms) / 60000;
+  if (m < 60) return `${Math.max(1, Math.round(m))} 分鐘前觸發`;
+  if (m < 1440) return `${Math.round(m / 60)} 小時前觸發`;
+  return `${Math.round(m / 1440)} 天前觸發`;
+}
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+// ---------- 計算 ----------
+function dir(s) { return s.side === "LONG" ? 1 : -1; }
+function priceMove(s, price) { return price == null ? null : (dir(s) * (price - s.price) / s.price) * 100; }
+/** 1 倍槓桿下的倉位盈虧 %：已平倉部分（扣手續費）+ 剩餘倉位的浮動。 */
+function positionPnl(s, price) {
+  const t = s.track;
+  if (t.status === "CLOSED" || price == null) return t.realized_pct;
+  return t.realized_pct + t.remaining * priceMove(s, price);
+}
+
+// ---------- 資料 ----------
+async function api(path) {
+  const r = await fetch(path, { cache: "no-store" });
+  if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || r.status);
+  return r.json();
+}
+// 兩種模式：本機 signal_server.py（有 /api），或 GitHub Pages 靜態網站（讀 data/*.json，由排程更新）
+let STATIC = null;
+let livePrices = {};   // 靜態模式下，瀏覽器直接向 Binance 合約抓的即時價
+let livePricesAt = 0;
+
+async function loadState() {
+  if (STATIC !== true) {
+    try { const st = await api("api/state"); STATIC = false; return st; } catch (e) { if (STATIC === false) throw e; }
+  }
+  STATIC = true;
+  return api(`data/state.json?t=${Date.now()}`);
+}
+
+/** 派網行情不允許瀏覽器直接讀，靜態網站改用 Binance U 本位合約的公開即時價（同一個幣價差通常 < 0.1%）。 */
+async function loadLivePrices() {
+  try {
+    const rows = await (await fetch("https://fapi.binance.com/fapi/v1/ticker/price", { cache: "no-store" })).json();
+    livePrices = Object.fromEntries(rows.map((r) => [r.symbol, Number(r.price)]));
+    livePricesAt = Date.now();
+  } catch { /* 抓不到就用快照價 */ }
+}
+
+function applyLivePrices() {
+  for (const s of state.signals) {
+    s.liveSource = "snapshot";
+    const p = livePrices[s.symbol.replace("_USDT_PERP", "USDT")];
+    // 名稱相同但不是同一個商品（例如代幣化股票）時價差會很大，這種就不用
+    if (p && s.live && Math.abs(p / s.live - 1) < 0.05) { s.live = p; s.liveSource = "binance"; }
+  }
+}
+
+async function refresh() {
+  try {
+    state = await loadState();
+  } catch (e) {
+    $("foot").textContent = `無法讀取資料：${e.message}`;
+    return;
+  }
+  if (STATIC) { await loadLivePrices(); applyLivePrices(); }
+  handleNotifications();
+  renderList();
+  if (current) {
+    const s = state.signals.find((x) => x.id === current.id);
+    if (s) { current = s; renderDetailHead(); renderLevels(); }
+  }
+}
+
+// ---------- 列表 ----------
+function renderStats() {
+  const parts = [];
+  for (const [name, st] of Object.entries(state.strategies)) {
+    for (const iv of Object.keys((state.stats[name] || {}))) {
+      if (!state.intervals.includes(lbl(iv))) continue;
+      const s = state.stats[name][iv];
+      const a = s.all || {};
+      if (!a.trades) continue;
+      const h1 = s.first_half || {}, h2 = s.second_half || {};
+      const ok = a.expectancy_r > 0;
+      parts.push(`<h3>${esc(st.title)} · ${lbl(iv)} 回測</h3>
+        <div class="muted">${fmtTime(s.start, false).slice(0, 10)} ~ ${fmtTime(s.end, false).slice(0, 10)}，${s.symbols} 個幣，含手續費 ${(s.fee * 100).toFixed(2)}%/次</div>
+        <div class="grid">
+          <div><span class="muted">勝率</span><b>${(a.win_rate * 100).toFixed(1)}%</b></div>
+          <div><span class="muted">期望值 / 筆</span><b class="${ok ? "up" : "down"}">${a.expectancy_r >= 0 ? "+" : ""}${a.expectancy_r.toFixed(3)}R</b></div>
+          <div><span class="muted">交易筆數</span><b>${a.trades}</b></div>
+          <div><span class="muted">獲利因子</span><b>${a.profit_factor.toFixed(2)}</b></div>
+          <div><span class="muted">每筆賠 ${a.risk_per_trade_pct}% 總報酬</span><b class="${a.total_return_pct >= 0 ? "up" : "down"}">${pct(a.total_return_pct)}</b></div>
+          <div><span class="muted">最大回撤</span><b class="down">${a.max_drawdown_pct.toFixed(1)}%</b></div>
+        </div>
+        <div class="muted">前半段 ${h1.trades || 0} 筆 期望值 ${h1.trades ? h1.expectancy_r.toFixed(3) + "R" : "—"}；後半段 ${h2.trades || 0} 筆 期望值 ${h2.trades ? h2.expectancy_r.toFixed(3) + "R" : "—"}</div>
+        ${a.expectancy_r < 0.1 ? `<p class="warn">期望值接近 0，優勢很小、可能只是運氣。先用小資金或只觀察。</p>` : ""}`);
+    }
+  }
+  $("stats").innerHTML = parts.join("") ||
+    `<span class="muted">還沒有回測數字。執行 <code>python signal_backtest.py</code> 後這裡會顯示勝率與期望值。</span>`;
+}
+
+function ladderHtml(s, price) {
+  const t = s.track, d = dir(s);
+  const kinds = new Set(t.events.map((e) => e.kind));
+  const rows = [
+    ["TP3", s.tps[2], kinds.has("TP3"), "tp"], ["TP2", s.tps[1], kinds.has("TP2"), "tp"],
+    ["TP1", s.tps[0], kinds.has("TP1"), "tp"], ["BE", t.be, kinds.has("BE_EXIT"), "be"],
+    ["進場", s.price, true, "entry"], ["SL", s.sl, kinds.has("SL"), "sl"],
+  ];
+  return `<div class="ladder">${rows.map(([name, p, hit, cls]) => {
+    const dist = d * (p - s.price) / s.price * 100;
+    return `<div class="lv ${cls} ${hit && cls !== "entry" ? "hit" : ""}">
+      <span>${name}</span><span class="bar"></span><span class="num">${fp(p, s.price)}</span>
+      <span class="pct num">${cls === "entry" ? "" : pct(dist)}</span></div>`;
+  }).join("")}</div>`;
+}
+
+function timelineHtml(s) {
+  const ev = s.track.events;
+  if (!ev.length) return "";
+  return `<ul class="timeline">${ev.map((e) => {
+    const bad = e.kind === "SL";
+    return `<li class="${bad ? "bad" : ""}"><div>${esc(e.text)}</div>
+      <div class="t num">${fmtShort(e.time)} · ${fp(e.price, s.price)} · ${KIND_TEXT[e.kind] || e.kind}</div></li>`;
+  }).join("")}</ul>`;
+}
+
+function statusText(s) {
+  const t = s.track;
+  if (t.status === "OPEN") return { cls: "", text: "● 持倉中" };
+  const last = t.events[t.events.length - 1];
+  return { cls: "closed", text: `已結束 · ${KIND_TEXT[last.kind] || last.kind}` };
+}
+
+function cardHtml(s) {
+  const price = s.live;
+  const pnl = positionPnl(s, price);
+  const mv = priceMove(s, price);
+  const st = statusText(s);
+  const title = (state.strategies[s.strategy] || {}).title || s.strategy;
+  return `<div class="panel card" data-id="${esc(s.id)}">
+    <div class="row1"><span class="side ${s.side}">${s.side === "LONG" ? "做多" : "做空"}</span>
+      <span class="pair">${pair(s.symbol).split("/")[0]}<small>/USDT</small></span>
+      <span class="chip">${s.label}</span><span class="status ${st.cls}">${st.text}</span></div>
+    <div class="meta">${esc(title)} · ${ago(s.time)} · 訊號價 ${fp(s.price)}</div>
+    <div class="pnl"><div class="big num ${pnl >= 0 ? "up" : "down"}">${pct(pnl)}<small>${s.track.status === "OPEN" ? "未實現盈虧" : "已實現盈虧"}（1x）</small></div>
+      <div class="right num">價格 ${pct(mv)}<br>現價 ${fp(price, s.price)}</div></div>
+    ${ladderHtml(s, price)}
+    ${timelineHtml(s)}
+  </div>`;
+}
+
+function renderList() {
+  renderStats();
+  const open = state.signals.filter((s) => s.track.status === "OPEN");
+  const closed = state.signals.filter((s) => s.track.status !== "OPEN");
+  $("n-open").textContent = open.length;
+  $("n-closed").textContent = closed.length;
+  const shown = tab === "OPEN" ? open : closed;
+  $("cards").innerHTML = shown.map(cardHtml).join("") ||
+    `<div class="empty">${tab === "OPEN" ? "目前沒有進行中的訊號" : "最近沒有已結束的訊號"}</div>`;
+  $("foot").textContent = `監看 ${state.symbols} 個幣 · 週期 ${state.intervals.join("/")} · ` +
+    `最後掃描 ${state.updated ? fmtTime(state.updated) : "—"}` +
+    (STATIC ? ` · 訊號約每 10 分鐘由 GitHub 排程更新 · 現價${livePricesAt ? "來自 Binance 合約即時價" : "為掃描時價格"}`
+      : " · 每 30 秒更新頁面");
+}
+
+// ---------- 單一訊號 ----------
+function renderDetailHead() {
+  const s = current;
+  const price = s.live;
+  const i = s.info || {};
+  const st = (state.stats[s.strategy] || {})[s.interval];
+  const a = st && st.all;
+  $("detail-head").innerHTML = `<div class="dh">
+    <div class="row1"><span class="pair">${pair(s.symbol)}</span><span class="chip">${s.label}</span>
+      <span class="dir ${s.side === "LONG" ? "up" : "down"}">${s.side}</span></div>
+    <div class="muted">訊號時間 ${fmtTime(s.time)} · UTC+8</div>
+    <div class="prices"><div><span class="muted">訊號價格</span><b class="num">${fp(s.price)}</b></div>
+      <div><span class="muted">現價</span><b class="num ${priceMove(s, price) >= 0 ? "up" : "down"}">${fp(price, s.price)}</b></div></div>
+    <details><summary>RSI 與策略資訊</summary><div class="kv num">
+      <span>策略</span><span>${esc((state.strategies[s.strategy] || {}).title || s.strategy)}</span>
+      <span>觸發原因</span><span>${esc(i.reason || "—")}</span>
+      <span>訊號 RSI</span><span>${i.rsi ?? "—"}</span>
+      <span>MACD DIF / DEA</span><span>${fp(i.macd, s.price)} / ${fp(i.macd_signal, s.price)}</span>
+      <span>MACD 柱</span><span>${fp(i.hist, s.price)}</span>
+      <span>ATR</span><span>${fp(i.atr, s.price)}</span>
+      <span>EMA144 / 169</span><span>${fp(i.ema144)} / ${fp(i.ema169)}</span>
+      ${a ? `<span>回測勝率</span><span>${(a.win_rate * 100).toFixed(1)}%（${a.trades} 筆）</span>
+      <span>回測期望值</span><span>${a.expectancy_r.toFixed(3)}R / 筆</span>` : ""}
+      <span>出場規則</span><span>TP1/2/3 各平 1/3；TP1 後止損移到 BE，TP2 後移到 TP1</span>
+    </div></details>
+    <div class="muted">現價更新 ${fmtTime(Date.now())} · 資訊每 30 秒更新</div></div>`;
+}
+
+function renderLevels() {
+  const s = current;
+  const pnl = positionPnl(s, s.live);
+  $("detail-levels").innerHTML = `<div class="pnl"><div class="big num ${pnl >= 0 ? "up" : "down"}">${pct(pnl)}
+      <small>${s.track.status === "OPEN" ? "未實現" : "已實現"}（1x 含費）</small></div>
+      <div class="right">${statusText(s).text}</div></div>
+    ${ladderHtml(s, s.live)}${timelineHtml(s)}`;
+}
+
+function openDetail(id) {
+  const s = state && state.signals.find((x) => x.id === id);
+  if (!s) return;
+  current = s;
+  if (chart) setLive(false);
+  $("list-view").classList.add("hidden");
+  $("detail-view").classList.remove("hidden");
+  $("back").classList.remove("hidden");
+  $("subtitle").textContent = "訊號圖表";
+  const sel = $("interval");
+  const ivs = [s.interval, ...["15M", "60M", "4H", "1D"].filter((x) => x !== s.interval)];
+  sel.innerHTML = ivs.map((iv, k) => `<option value="${iv}">${lbl(iv)}${k === 0 ? " · 原訊號" : ""}</option>`).join("");
+  renderDetailHead();
+  renderLevels();
+  loadChart(s.interval, true);
+  window.scrollTo(0, 0);
+}
+
+function closeDetail() {
+  current = null;
+  setLive(false);
+  $("chart-panel").classList.remove("fs");
+  $("detail-view").classList.add("hidden");
+  $("list-view").classList.remove("hidden");
+  $("back").classList.add("hidden");
+  $("subtitle").textContent = "訊號列表";
+  if (location.hash) history.replaceState(null, "", location.pathname);
+}
+
+// ---------- 圖表 ----------
+function ensureChart() {
+  if (chart) return;
+  const el = $("chart");
+  chart = LightweightCharts.createChart(el, {
+    autoSize: true,
+    layout: { background: { color: "#171a21" }, textColor: "#8a91a0" },
+    grid: { vertLines: { color: "#1f2430" }, horzLines: { color: "#1f2430" } },
+    rightPriceScale: { borderColor: "#262b36" },
+    timeScale: { borderColor: "#262b36", timeVisible: true, secondsVisible: false },
+    crosshair: { mode: 0 },
+  });
+  candleSeries = chart.addCandlestickSeries({
+    upColor: "#22c58b", downColor: "#f0697a", borderVisible: false, wickUpColor: "#22c58b", wickDownColor: "#f0697a",
+  });
+}
+
+const EMA_COLORS = ["#e6c35c", "#4fb3d9", "#6f8cff", "#b07cff", "#d27cc0", "#9aa3b2"];
+
+async function loadChart(interval, focusSignal) {
+  ensureChart();
+  $("interval-note").textContent = interval === current.interval ? "原訊號週期" : `原訊號為 ${current.label}`;
+  let data;
+  try {
+    data = STATIC
+      ? await api(`data/chart/${current.symbol}_${interval}.json?t=${state.updated}`)
+      : await api(`api/chart?symbol=${encodeURIComponent(current.symbol)}&interval=${interval}&strategy=${current.strategy}`);
+  } catch (e) {
+    $("kinfo").textContent = `圖表載入失敗：${e.message}`;
+    return;
+  }
+  chartData = data;
+  const prec = decimals(current.price);
+  candleSeries.applyOptions({ priceFormat: { type: "price", precision: prec, minMove: Math.pow(10, -prec) } });
+  candleSeries.setData(data.candles.map((c) => ({ ...c, time: c.time + TZ_SHIFT })));
+  const lastC = data.candles[data.candles.length - 1];
+  if (STATIC && lastC && current.liveSource === "binance") {
+    // 快照之後的價格變化：用即時價更新最後一根 K 線
+    const p = current.live;
+    candleSeries.update({ ...lastC, time: lastC.time + TZ_SHIFT, close: p, high: Math.max(lastC.high, p), low: Math.min(lastC.low, p) });
+  }
+
+  for (const s of Object.values(emaSeries)) chart.removeSeries(s);
+  emaSeries = {};
+  const showEmas = $("opt-emas").checked;
+  Object.entries(data.emas).forEach(([name, pts], k) => {
+    const s = chart.addLineSeries({ color: EMA_COLORS[k % EMA_COLORS.length], lineWidth: 1, priceLineVisible: false,
+      lastValueVisible: false, crosshairMarkerVisible: false, visible: showEmas });
+    s.setData(pts.map((p) => ({ time: p.time + TZ_SHIFT, value: p.value })));
+    emaSeries[name] = s;
+  });
+  $("legend").innerHTML = Object.keys(data.emas).map((n, k) =>
+    `<span style="--c:${EMA_COLORS[k % EMA_COLORS.length]}">${n}</span>`).join("");
+
+  // 訊號標記：放在包含訊號收盤時間（前一秒）的那根 K 線
+  const sigSec = current.time / 1000 - 1;
+  let idx = -1;
+  for (let k = 0; k < data.candles.length; k++) if (data.candles[k].time <= sigSec) idx = k;
+  if (idx >= 0) {
+    const long = current.side === "LONG";
+    candleSeries.setMarkers([{ time: data.candles[idx].time + TZ_SHIFT, position: long ? "belowBar" : "aboveBar",
+      color: long ? "#22c58b" : "#f0697a", shape: long ? "arrowUp" : "arrowDown",
+      text: `${current.side} ${fp(current.price)}` }]);
+  } else {
+    candleSeries.setMarkers([]);
+  }
+  drawLevels();
+
+  const l = data.last;
+  if (l && l.time) {
+    $("kinfo").innerHTML = `訊號 RSI ${current.info.rsi ?? "—"} · RSI・MACD<br>最新 K 棒 · ${fmtTime(l.time)}　開 ${fp(l.open)}　高 ${fp(l.high)}　低 ${fp(l.low)}　收 ${fp(l.close)}　RSI ${l.rsi.toFixed(2)}　MACD 柱 ${fp(l.hist, l.close)}`;
+  }
+  if (focusSignal) focusOnSignal(idx);
+  else if (live) chart.timeScale().scrollToRealTime();
+}
+
+function drawLevels() {
+  for (const pl of priceLines) candleSeries.removePriceLine(pl);
+  priceLines = [];
+  if (!$("opt-levels").checked) return;
+  const s = current;
+  const lines = [["進場", s.price, "#e6e8ee", 0], ["SL", s.sl, "#f0697a", 2],
+    ["TP1", s.tps[0], "#22c58b", 2], ["TP2", s.tps[1], "#22c58b", 2], ["TP3", s.tps[2], "#22c58b", 2]];
+  if (s.track.stop !== s.sl) lines.push(["保護止損", s.track.stop, "#d9b45a", 1]);
+  for (const [title, price, color, style] of lines) {
+    priceLines.push(candleSeries.createPriceLine({ price, color, lineWidth: 1, lineStyle: style, axisLabelVisible: true, title }));
+  }
+}
+
+function focusOnSignal(idx) {
+  if (idx < 0) return chart.timeScale().fitContent();
+  chart.timeScale().setVisibleLogicalRange({ from: idx - 90, to: idx + 30 });
+}
+
+let liveTimer = null;
+function setLive(on) {
+  live = on;
+  $("btn-live").classList.toggle("on", on);
+  $("live-dot").classList.toggle("on", on);
+  $("live-hint").textContent = on ? "每 30 秒更新 K 線" : "點「最新價格」開啟即時更新";
+  clearInterval(liveTimer);
+  if (on && chart) {
+    chart.timeScale().scrollToRealTime();
+    liveTimer = setInterval(() => current && loadChart($("interval").value, false), 30000);
+  }
+}
+
+// ---------- 通知 ----------
+function lastSeen() { try { return Number(localStorage.getItem("lastSeenNote") || 0); } catch { return 0; } }
+function setLastSeen(v) { try { localStorage.setItem("lastSeenNote", String(v)); } catch { /* 私密模式 */ } }
+
+function handleNotifications() {
+  const notes = state.notifications;
+  const seen = lastSeen();
+  const unread = notes.filter((n) => !n.initial && n.created > seen).length;
+  $("badge").textContent = unread;
+  $("badge").classList.toggle("hidden", unread === 0);
+  if (notified === null) { notified = new Set(notes.map((n) => n.id)); return; }
+  for (const n of notes) {
+    if (notified.has(n.id)) continue;
+    notified.add(n.id);
+    if (!n.initial && "Notification" in window && Notification.permission === "granted") {
+      try { new Notification(KIND_TEXT[n.kind] || "訊號", { body: n.text, tag: n.id }); } catch { /* iOS 非安裝模式不支援 */ }
+    }
+  }
+  if (!$("notif").classList.contains("hidden")) renderNotes();
+}
+
+function renderNotes() {
+  const seen = lastSeen();
+  $("notif-list").innerHTML = state.notifications.map((n) => `
+    <div class="note ${!n.initial && n.created > seen ? "new" : ""}" data-id="${esc(n.signal_id)}">
+      <div>${esc(n.text)}</div><div class="t num">${fmtTime(n.time)} · ${KIND_TEXT[n.kind] || n.kind}</div></div>`).join("") ||
+    `<div class="empty">還沒有通知</div>`;
+  const perm = "Notification" in window ? Notification.permission : "unsupported";
+  $("notif-perm").classList.toggle("hidden", perm === "granted" || perm === "unsupported");
+}
+
+function openNotes() {
+  renderNotes();
+  $("notif").classList.remove("hidden");
+  setLastSeen(Date.now());
+  $("badge").classList.add("hidden");
+}
+
+// ---------- 事件 ----------
+$("cards").addEventListener("click", (e) => {
+  const c = e.target.closest(".card");
+  if (c) { location.hash = "s=" + encodeURIComponent(c.dataset.id); }
+});
+document.querySelectorAll(".tab").forEach((b) => b.addEventListener("click", () => {
+  tab = b.dataset.tab;
+  document.querySelectorAll(".tab").forEach((x) => x.classList.toggle("active", x === b));
+  renderList();
+}));
+$("back").addEventListener("click", closeDetail);
+$("bell").addEventListener("click", openNotes);
+$("notif-close").addEventListener("click", () => $("notif").classList.add("hidden"));
+$("notif-list").addEventListener("click", (e) => {
+  const n = e.target.closest(".note");
+  if (!n) return;
+  $("notif").classList.add("hidden");
+  location.hash = "s=" + encodeURIComponent(n.dataset.id);
+});
+$("notif-perm").addEventListener("click", async () => {
+  if ("Notification" in window) await Notification.requestPermission();
+  renderNotes();
+});
+$("interval").addEventListener("change", (e) => loadChart(e.target.value, true));
+$("btn-signal").addEventListener("click", () => {
+  setLive(false);
+  const sel = $("interval");
+  if (sel.value !== current.interval) { sel.value = current.interval; loadChart(current.interval, true); }
+  else {
+    const sigSec = current.time / 1000 - 1;
+    let idx = -1;
+    chartData.candles.forEach((c, k) => { if (c.time <= sigSec) idx = k; });
+    focusOnSignal(idx);
+  }
+});
+$("btn-live").addEventListener("click", () => setLive(!live));
+$("btn-full").addEventListener("click", () => {
+  const el = $("chart-panel");
+  if (document.fullscreenElement) document.exitFullscreen();
+  else if (el.requestFullscreen) el.requestFullscreen();
+  else el.classList.toggle("fs");
+});
+$("btn-more").addEventListener("click", () => $("more").classList.toggle("hidden"));
+$("opt-levels").addEventListener("change", drawLevels);
+$("opt-emas").addEventListener("change", (e) => Object.values(emaSeries).forEach((s) => s.applyOptions({ visible: e.target.checked })));
+
+function route() {
+  const m = location.hash.match(/^#s=(.+)$/);
+  if (m && state) openDetail(decodeURIComponent(m[1]));
+  else if (!m && current) closeDetail();
+}
+window.addEventListener("hashchange", route);
+
+(async function init() {
+  await refresh();
+  route();
+  setInterval(refresh, 30000);
+})();
