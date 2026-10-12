@@ -118,3 +118,10 @@ details .kv { display: grid; grid-template-columns: auto 1fr; gap: 2px 12px; fon
   padding: calc(env(safe-area-inset-top) + 8px) 12px 12px; }
 .chart-panel.fs #chart { height: calc(100vh - 220px); }
 .pnl .big small, .pnl .right { white-space: nowrap; }
+.mtabs-row { margin-top: 0; }
+.mtab { flex: 1; }
+.mtab.active { background: var(--gold); color: #111; border-color: var(--gold); font-weight: 700; }
+.mtab span { font-size: 12px; opacity: .8; }
+.chip.warn-chip { color: var(--gold); border-color: rgba(217,180,90,.5); }
+.card .row1, .dh .row1 { flex-wrap: wrap; row-gap: 4px; }
+.side, .chip, .status, .dh .dir { white-space: nowrap; }

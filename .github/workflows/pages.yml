@@ -1,12 +1,17 @@
-# 每 10 分鐘掃描一次訊號，把網頁和資料直接發佈到 GitHub Pages。
+# 每 5 分鐘掃描一次訊號，把網頁和資料直接發佈到 GitHub Pages。
 # 只用派網公開行情，不需要任何金鑰。
 # 需要的設定：Settings → Pages → Source 選「GitHub Actions」。
 name: 訊號網頁
 
 on:
   schedule:
-    - cron: "*/10 * * * *"   # GitHub 排程常會延遲幾分鐘
+    - cron: "*/5 * * * *"   # 每 5 分鐘（GitHub 最短就是 5 分鐘），排程常會延遲幾分鐘
   workflow_dispatch:
+    inputs:
+      test_telegram:
+        description: "傳一則 Telegram 測試訊息"
+        type: boolean
+        default: false
   push:
     branches: [main, claude/project-thread-t012rc]
     paths: ["web/**", "grid_trading/**", "signal_*.py", "stats/**", ".github/workflows/pages.yml"]
@@ -36,9 +41,16 @@ jobs:
             || echo "[]" > previous_notifications.json
       - name: 掃描訊號、產生網站
         run: python signal_snapshot.py --out site --previous previous_notifications.json
+      - name: 整理要推到 Telegram 的新通知
+        run: python signal_telegram.py outbox site/data previous_notifications.json outbox.json
       - uses: actions/upload-pages-artifact@v3
         with:
           path: site
+      - uses: actions/upload-artifact@v4
+        with:
+          name: telegram-outbox
+          path: outbox.json
+          retention-days: 1
 
   deploy:
     needs: build
@@ -52,3 +64,24 @@ jobs:
     steps:
       - id: deployment
         uses: actions/deploy-pages@v4
+
+  # 網站部署成功後才推 Telegram，免得部署失敗時下一次重送。
+  # Bot Token 和 Chat ID 放在 Settings → Secrets and variables → Actions，沒設定就跳過。
+  telegram:
+    needs: deploy
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: signal_telegram.py
+          sparse-checkout-cone-mode: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: telegram-outbox
+      - run: python3 signal_telegram.py send outbox.json
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TELEGRAM_TEST: ${{ inputs.test_telegram }}
+ 
