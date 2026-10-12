@@ -5,19 +5,23 @@ from __future__ import annotations
 import json
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pandas as pd
 
 from .. import indicators as ind
+from ..history import resample
 from ..markets import LABELS as MARKET_LABELS, classify, display_name
 from ..pionex import PionexPublic
 from .strategy import Strategy
 from .tracker import track
 
-INTERVAL_MS = {"15M": 900_000, "30M": 1_800_000, "60M": 3_600_000, "4H": 14_400_000, "8H": 28_800_000,
-               "12H": 43_200_000, "1D": 86_400_000}
+INTERVAL_MS = {"15M": 900_000, "30M": 1_800_000, "60M": 3_600_000, "2H": 7_200_000, "4H": 14_400_000,
+               "8H": 28_800_000, "12H": 43_200_000, "1D": 86_400_000}
 LABEL = {"60M": "1H"}
+# 派網沒有的週期，用較小的週期合成：週期 → (來源週期, 幾根合一根)。分組從 00:00 UTC 起算，和幣安的 2h K 線一致。
+SYNTHETIC = {"2H": ("60M", 2)}
 
 
 def label(interval: str) -> str:
@@ -26,6 +30,10 @@ def label(interval: str) -> str:
 
 def fetch_klines(api: PionexPublic, symbol: str, interval: str, bars: int = 1000) -> pd.DataFrame:
     """抓最近 bars 根 K 線（每次最多 500，往回翻頁）。最後一根可能還沒收盤。"""
+    if interval in SYNTHETIC:
+        base, k = SYNTHETIC[interval]
+        df = fetch_klines(api, symbol, base, bars * k)
+        return resample(df, f"{INTERVAL_MS[interval] // 3_600_000}h", origin="epoch") if len(df) else df
     frames = []
     end = None
     while bars > 0:
@@ -56,8 +64,10 @@ def fetch_klines(api: PionexPublic, symbol: str, interval: str, bars: int = 1000
 class Engine:
     def __init__(self, strategies: list[Strategy], symbols: list[str], intervals: list[str],
                  keep_days: float = 7, fee: float = 0.0005, state_dir: Path = Path("output"),
-                 stats_path: Path = Path("stats/signal_stats.json")):
+                 stats_path: Path = Path("stats/signal_stats.json"), workers: int = 4):
         self.api = PionexPublic(pause=0.1)
+        self.workers = workers  # 同時抓幾個 K 線（每條執行緒各用自己的連線）
+        self._local = threading.local()
         self.strategies = {s.name: s for s in strategies}
         self.symbols = symbols
         self.intervals = intervals
@@ -72,6 +82,17 @@ class Engine:
         self._prices: dict[str, float] = {}
         self._prices_at = 0.0
 
+    def client(self) -> PionexPublic:
+        """這條執行緒自己的 API 連線。"""
+        if not hasattr(self._local, "api"):
+            self._local.api = PionexPublic(pause=0.1)
+        return self._local.api
+
+    def klines_many(self, jobs: list[tuple[str, str]], bars: int = 1000) -> dict[tuple[str, str], pd.DataFrame]:
+        """同時抓多個（symbol, interval）的 K 線。"""
+        with ThreadPoolExecutor(self.workers) as ex:
+            return dict(zip(jobs, ex.map(lambda j: fetch_klines(self.client(), j[0], j[1], bars), jobs)))
+
     # ---------- 行情 ----------
     def prices(self) -> dict[str, float]:
         """所有永續合約最新價，快取 10 秒。"""
@@ -85,7 +106,7 @@ class Engine:
         return self._prices
 
     def chart(self, symbol: str, interval: str, strategy: str | None = None, bars: int = 1000) -> dict:
-        df = fetch_klines(self.api, symbol, interval, bars)
+        df = fetch_klines(self.client(), symbol, interval, bars)
         strat = self.strategies.get(strategy or "") or next(iter(self.strategies.values()))
         lines = {}
         for name, n in strat.chart_emas.items():
@@ -110,10 +131,11 @@ class Engine:
     def scan_once(self) -> None:
         now = pd.Timestamp.now(tz="UTC")
         found: dict[str, dict] = {}
+        frames = self.klines_many([(sym, iv) for iv in self.intervals for sym in self.symbols])
         for interval in self.intervals:
             bar = pd.Timedelta(milliseconds=INTERVAL_MS[interval])
             for sym in self.symbols:
-                df = fetch_klines(self.api, sym, interval, 1000)
+                df = frames[(sym, interval)]
                 if len(df) < 250:
                     continue
                 closed = df[df["time"] + bar <= now]
@@ -139,15 +161,19 @@ class Engine:
 
     def _notify(self, found: dict[str, dict]) -> None:
         first_run = not self.signals and not self.notifications
+        now = time.time() * 1000
         for sid, s in found.items():
             old = self.signals.get(sid)
             pair = s["name"] if s["market"] != "crypto" else s["symbol"].replace("_USDT_PERP", "/USDT")
             side = "做多" if s["side"] == "LONG" else "做空"
+            quiet = first_run
             if old is None and not any(n["signal_id"] == sid and n["kind"] == "NEW" for n in self.notifications):
-                self._push(sid, "NEW", s["time"], f"{pair} {s['label']} {side}訊號 @ {s['price']:.6g}", first_run)
+                # 第一次出現時已經是 3 根 K 線以前的訊號（例如剛加上的新週期補掃到的舊訊號）：記下來但不推播
+                quiet = quiet or now - s["time"] > 3 * INTERVAL_MS[s["interval"]]
+                self._push(sid, "NEW", s["time"], f"{pair} {s['label']} {side}訊號 @ {s['price']:.6g}", quiet)
             seen = len(old["track"]["events"]) if old else self._seen_events(sid)
             for e in s["track"]["events"][seen:]:
-                self._push(sid, e["kind"], e["time"], f"{pair} {s['label']} {side}：{e['text']}", first_run)
+                self._push(sid, e["kind"], e["time"], f"{pair} {s['label']} {side}：{e['text']}", quiet)
         self.notifications = self.notifications[-300:]
         self._save_notifications()
 
