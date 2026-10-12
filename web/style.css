@@ -117,3 +117,4 @@ details .kv { display: grid; grid-template-columns: auto 1fr; gap: 2px 12px; fon
 .chart-panel.fs { position: fixed; inset: 0; z-index: 30; margin: 0; border-radius: 0; overflow: auto;
   padding: calc(env(safe-area-inset-top) + 8px) 12px 12px; }
 .chart-panel.fs #chart { height: calc(100vh - 220px); }
+.pnl .big small, .pnl .right { white-space: nowrap; }

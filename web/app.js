@@ -59,13 +59,45 @@ async function api(path) {
   if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || r.status);
   return r.json();
 }
+// 兩種模式：本機 signal_server.py（有 /api），或 GitHub Pages 靜態網站（讀 data/*.json，由排程更新）
+let STATIC = null;
+let livePrices = {};   // 靜態模式下，瀏覽器直接向 Binance 合約抓的即時價
+let livePricesAt = 0;
+
+async function loadState() {
+  if (STATIC !== true) {
+    try { const st = await api("api/state"); STATIC = false; return st; } catch (e) { if (STATIC === false) throw e; }
+  }
+  STATIC = true;
+  return api(`data/state.json?t=${Date.now()}`);
+}
+
+/** 派網行情不允許瀏覽器直接讀，靜態網站改用 Binance U 本位合約的公開即時價（同一個幣價差通常 < 0.1%）。 */
+async function loadLivePrices() {
+  try {
+    const rows = await (await fetch("https://fapi.binance.com/fapi/v1/ticker/price", { cache: "no-store" })).json();
+    livePrices = Object.fromEntries(rows.map((r) => [r.symbol, Number(r.price)]));
+    livePricesAt = Date.now();
+  } catch { /* 抓不到就用快照價 */ }
+}
+
+function applyLivePrices() {
+  for (const s of state.signals) {
+    s.liveSource = "snapshot";
+    const p = livePrices[s.symbol.replace("_USDT_PERP", "USDT")];
+    // 名稱相同但不是同一個商品（例如代幣化股票）時價差會很大，這種就不用
+    if (p && s.live && Math.abs(p / s.live - 1) < 0.05) { s.live = p; s.liveSource = "binance"; }
+  }
+}
+
 async function refresh() {
   try {
-    state = await api("/api/state");
+    state = await loadState();
   } catch (e) {
-    $("foot").textContent = `無法連到伺服器：${e.message}`;
+    $("foot").textContent = `無法讀取資料：${e.message}`;
     return;
   }
+  if (STATIC) { await loadLivePrices(); applyLivePrices(); }
   handleNotifications();
   renderList();
   if (current) {
@@ -164,7 +196,9 @@ function renderList() {
   $("cards").innerHTML = shown.map(cardHtml).join("") ||
     `<div class="empty">${tab === "OPEN" ? "目前沒有進行中的訊號" : "最近沒有已結束的訊號"}</div>`;
   $("foot").textContent = `監看 ${state.symbols} 個幣 · 週期 ${state.intervals.join("/")} · ` +
-    `最後掃描 ${state.updated ? fmtTime(state.updated) : "—"} · 每 30 秒更新頁面`;
+    `最後掃描 ${state.updated ? fmtTime(state.updated) : "—"}` +
+    (STATIC ? ` · 訊號約每 10 分鐘由 GitHub 排程更新 · 現價${livePricesAt ? "來自 Binance 合約即時價" : "為掃描時價格"}`
+      : " · 每 30 秒更新頁面");
 }
 
 // ---------- 單一訊號 ----------
@@ -257,7 +291,9 @@ async function loadChart(interval, focusSignal) {
   $("interval-note").textContent = interval === current.interval ? "原訊號週期" : `原訊號為 ${current.label}`;
   let data;
   try {
-    data = await api(`/api/chart?symbol=${encodeURIComponent(current.symbol)}&interval=${interval}&strategy=${current.strategy}`);
+    data = STATIC
+      ? await api(`data/chart/${current.symbol}_${interval}.json?t=${state.updated}`)
+      : await api(`api/chart?symbol=${encodeURIComponent(current.symbol)}&interval=${interval}&strategy=${current.strategy}`);
   } catch (e) {
     $("kinfo").textContent = `圖表載入失敗：${e.message}`;
     return;
@@ -266,6 +302,12 @@ async function loadChart(interval, focusSignal) {
   const prec = decimals(current.price);
   candleSeries.applyOptions({ priceFormat: { type: "price", precision: prec, minMove: Math.pow(10, -prec) } });
   candleSeries.setData(data.candles.map((c) => ({ ...c, time: c.time + TZ_SHIFT })));
+  const lastC = data.candles[data.candles.length - 1];
+  if (STATIC && lastC && current.liveSource === "binance") {
+    // 快照之後的價格變化：用即時價更新最後一根 K 線
+    const p = current.live;
+    candleSeries.update({ ...lastC, time: lastC.time + TZ_SHIFT, close: p, high: Math.max(lastC.high, p), low: Math.min(lastC.low, p) });
+  }
 
   for (const s of Object.values(emaSeries)) chart.removeSeries(s);
   emaSeries = {};
