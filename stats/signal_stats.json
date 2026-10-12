@@ -14,7 +14,8 @@
         "risk_per_trade_pct": 1.0,
         "long_trades": 284,
         "short_trades": 377,
-        "avg_bars": 11.107413010590015
+        "avg_bars": 11.107413010590015,
+        "max_concurrent": 7
       },
       "first_half": {
         "trades": 256,
@@ -29,7 +30,8 @@
         "risk_per_trade_pct": 1.0,
         "long_trades": 119,
         "short_trades": 137,
-        "avg_bars": 11.90234375
+        "avg_bars": 11.90234375,
+        "max_concurrent": 6
       },
       "second_half": {
         "trades": 405,
@@ -44,7 +46,8 @@
         "risk_per_trade_pct": 1.0,
         "long_trades": 165,
         "short_trades": 240,
-        "avg_bars": 10.604938271604938
+        "avg_bars": 10.604938271604938,
+        "max_concurrent": 7
       },
       "start": 1683360000000,
       "end": 1791331200000,
@@ -55,7 +58,7 @@
       "interval": "4H",
       "params": {},
       "fee": 0.0005,
-      "generated": "2026-10-12T14:42:49+00:00"
+      "generated": "2026-10-12T14:50:28+00:00"
     },
     "60M": {
       "all": {
@@ -71,7 +74,8 @@
         "risk_per_trade_pct": 1.0,
         "long_trades": 485,
         "short_trades": 690,
-        "avg_bars": 10.697021276595745
+        "avg_bars": 10.697021276595745,
+        "max_concurrent": 12
       },
       "first_half": {
         "trades": 532,
@@ -86,7 +90,8 @@
         "risk_per_trade_pct": 1.0,
         "long_trades": 179,
         "short_trades": 353,
-        "avg_bars": 11.55451127819549
+        "avg_bars": 11.55451127819549,
+        "max_concurrent": 12
       },
       "second_half": {
         "trades": 643,
@@ -101,7 +106,8 @@
         "risk_per_trade_pct": 1.0,
         "long_trades": 306,
         "short_trades": 337,
-        "avg_bars": 9.98755832037325
+        "avg_bars": 9.98755832037325,
+        "max_concurrent": 7
       },
       "start": 1756540800000,
       "end": 1791781200000,
@@ -112,7 +118,247 @@
       "interval": "60M",
       "params": {},
       "fee": 0.0005,
-      "generated": "2026-10-12T14:44:48+00:00"
+      "generated": "2026-10-12T14:52:27+00:00"
+    },
+    "stock|4H": {
+      "all": {
+        "trades": 341,
+        "win_rate": 0.49266862170087977,
+        "tp1_rate": 0.49266862170087977,
+        "avg_win_r": 1.0554126183474284,
+        "avg_loss_r": -1.0575632518234341,
+        "expectancy_r": -0.016566342179138233,
+        "profit_factor": 0.9691234653953443,
+        "total_return_pct": -7.6412764905458115,
+        "max_drawdown_pct": -30.61855057780215,
+        "risk_per_trade_pct": 1.0,
+        "long_trades": 165,
+        "short_trades": 176,
+        "avg_bars": 10.30791788856305,
+        "max_concurrent": 10
+      },
+      "first_half": {
+        "trades": 104,
+        "win_rate": 0.5865384615384616,
+        "tp1_rate": 0.5865384615384616,
+        "avg_win_r": 1.1119687258070758,
+        "avg_loss_r": -1.063852979512612,
+        "expectancy_r": 0.2123501361075895,
+        "profit_factor": 1.4827650406169484,
+        "total_return_pct": 23.768235771936162,
+        "max_drawdown_pct": -8.346418565375924,
+        "risk_per_trade_pct": 1.0,
+        "long_trades": 38,
+        "short_trades": 66,
+        "avg_bars": 9.990384615384615,
+        "max_concurrent": 8
+      },
+      "second_half": {
+        "trades": 237,
+        "win_rate": 0.45147679324894513,
+        "tp1_rate": 0.45147679324894513,
+        "avg_win_r": 1.0231703514779098,
+        "avg_loss_r": -1.0554828034339367,
+        "expectancy_r": -0.11701914277753352,
+        "profit_factor": 0.79787932303407,
+        "total_return_pct": -25.37768440067236,
+        "max_drawdown_pct": -30.618550577802182,
+        "risk_per_trade_pct": 1.0,
+        "long_trades": 127,
+        "short_trades": 110,
+        "avg_bars": 10.447257383966244,
+        "max_concurrent": 10
+      },
+      "start": 1758931200000,
+      "end": 1791691200000,
+      "symbols": 56,
+      "market": "stock",
+      "strategy": "vegas_trend",
+      "title": "維加斯通道順勢 + MACD/RSI",
+      "interval": "4H",
+      "params": {},
+      "fee": 0.0005,
+      "generated": "2026-10-12T14:53:53+00:00"
+    },
+    "stock|60M": {
+      "all": {
+        "trades": 1362,
+        "win_rate": 0.46622613803230545,
+        "tp1_rate": 0.46769456681350957,
+        "avg_win_r": 1.0052851309040751,
+        "avg_loss_r": -1.1239216507636542,
+        "expectancy_r": -0.13122979587451458,
+        "profit_factor": 0.781254507504963,
+        "total_return_pct": -84.76460746522055,
+        "max_drawdown_pct": -85.11575485349042,
+        "risk_per_trade_pct": 1.0,
+        "long_trades": 709,
+        "short_trades": 653,
+        "avg_bars": 12.06387665198238,
+        "max_concurrent": 15
+      },
+      "first_half": {
+        "trades": 355,
+        "win_rate": 0.4535211267605634,
+        "tp1_rate": 0.4591549295774648,
+        "avg_win_r": 1.0757469605868097,
+        "avg_loss_r": -1.1541266521811495,
+        "expectancy_r": -0.14283185878497645,
+        "profit_factor": 0.7735364865297403,
+        "total_return_pct": -41.33579742237603,
+        "max_drawdown_pct": -42.696357697656616,
+        "risk_per_trade_pct": 1.0,
+        "long_trades": 204,
+        "short_trades": 151,
+        "avg_bars": 11.650704225352113,
+        "max_concurrent": 8
+      },
+      "second_half": {
+        "trades": 1007,
+        "win_rate": 0.47070506454816285,
+        "tp1_rate": 0.47070506454816285,
+        "avg_win_r": 0.9813518933958045,
+        "avg_loss_r": -1.1129277102852413,
+        "expectancy_r": -0.12713969425265367,
+        "profit_factor": 0.7841676852923262,
+        "total_return_pct": -74.02949010579309,
+        "max_drawdown_pct": -81.15221877883994,
+        "risk_per_trade_pct": 1.0,
+        "long_trades": 505,
+        "short_trades": 502,
+        "avg_bars": 12.20953326713009,
+        "max_concurrent": 15
+      },
+      "start": 1756803600000,
+      "end": 1791810000000,
+      "symbols": 58,
+      "market": "stock",
+      "strategy": "vegas_trend",
+      "title": "維加斯通道順勢 + MACD/RSI",
+      "interval": "60M",
+      "params": {},
+      "fee": 0.0005,
+      "generated": "2026-10-12T14:58:30+00:00"
+    },
+    "commodity|4H": {
+      "all": {
+        "trades": 72,
+        "win_rate": 0.5416666666666666,
+        "tp1_rate": 0.5416666666666666,
+        "avg_win_r": 0.8679124455816958,
+        "avg_loss_r": -1.105697457487988,
+        "expectancy_r": -0.0366587599919094,
+        "profit_factor": 0.9276630795055204,
+        "total_return_pct": -3.0167207045119326,
+        "max_drawdown_pct": -10.277368776183927,
+        "risk_per_trade_pct": 1.0,
+        "long_trades": 36,
+        "short_trades": 36,
+        "avg_bars": 10.180555555555555,
+        "max_concurrent": 4
+      },
+      "first_half": {
+        "trades": 18,
+        "win_rate": 0.3333333333333333,
+        "tp1_rate": 0.3333333333333333,
+        "avg_win_r": 0.9401502901742296,
+        "avg_loss_r": -1.18143490967718,
+        "expectancy_r": -0.47423984306004335,
+        "profit_factor": 0.3978849289425179,
+        "total_return_pct": -8.297240240788884,
+        "max_drawdown_pct": -9.263111488916886,
+        "risk_per_trade_pct": 1.0,
+        "long_trades": 11,
+        "short_trades": 7,
+        "avg_bars": 11.277777777777779,
+        "max_concurrent": 2
+      },
+      "second_half": {
+        "trades": 54,
+        "win_rate": 0.6111111111111112,
+        "tp1_rate": 0.6111111111111112,
+        "avg_win_r": 0.8547782920194171,
+        "avg_loss_r": -1.062418913379879,
+        "expectancy_r": 0.10920160103080194,
+        "profit_factor": 1.264306398728374,
+        "total_return_pct": 5.758299477728124,
+        "max_drawdown_pct": -8.476349083827516,
+        "risk_per_trade_pct": 1.0,
+        "long_trades": 25,
+        "short_trades": 29,
+        "avg_bars": 9.814814814814815,
+        "max_concurrent": 4
+      },
+      "start": 1748548800000,
+      "end": 1791763200000,
+      "symbols": 7,
+      "market": "commodity",
+      "strategy": "vegas_trend",
+      "title": "維加斯通道順勢 + MACD/RSI",
+      "interval": "4H",
+      "params": {},
+      "fee": 0.0005,
+      "generated": "2026-10-12T14:58:45+00:00"
+    },
+    "commodity|60M": {
+      "all": {
+        "trades": 271,
+        "win_rate": 0.5756457564575646,
+        "tp1_rate": 0.5756457564575646,
+        "avg_win_r": 0.9612221782035087,
+        "avg_loss_r": -1.1706246065357433,
+        "expectancy_r": 0.05656394851711024,
+        "profit_factor": 1.1138658572418751,
+        "total_return_pct": 14.420205822210308,
+        "max_drawdown_pct": -19.609634414188015,
+        "risk_per_trade_pct": 1.0,
+        "long_trades": 116,
+        "short_trades": 155,
+        "avg_bars": 11.881918819188192,
+        "max_concurrent": 6
+      },
+      "first_half": {
+        "trades": 75,
+        "win_rate": 0.6133333333333333,
+        "tp1_rate": 0.6133333333333333,
+        "avg_win_r": 1.0298286658941627,
+        "avg_loss_r": -1.174855363000473,
+        "expectancy_r": 0.17735084138823676,
+        "profit_factor": 1.3904020729293163,
+        "total_return_pct": 13.613502622929774,
+        "max_drawdown_pct": -8.802806490013026,
+        "risk_per_trade_pct": 1.0,
+        "long_trades": 42,
+        "short_trades": 33,
+        "avg_bars": 12.706666666666667,
+        "max_concurrent": 3
+      },
+      "second_half": {
+        "trades": 196,
+        "win_rate": 0.5612244897959183,
+        "tp1_rate": 0.5612244897959183,
+        "avg_win_r": 0.9325321924419626,
+        "avg_loss_r": -1.169197956099963,
+        "expectancy_r": 0.010344474204179171,
+        "profit_factor": 1.020164060581723,
+        "total_return_pct": 0.7100416593598835,
+        "max_drawdown_pct": -19.609634414188005,
+        "risk_per_trade_pct": 1.0,
+        "long_trades": 74,
+        "short_trades": 122,
+        "avg_bars": 11.566326530612244,
+        "max_concurrent": 6
+      },
+      "start": 1757937600000,
+      "end": 1791568800000,
+      "symbols": 7,
+      "market": "commodity",
+      "strategy": "vegas_trend",
+      "title": "維加斯通道順勢 + MACD/RSI",
+      "interval": "60M",
+      "params": {},
+      "fee": 0.0005,
+      "generated": "2026-10-12T14:59:21+00:00"
     }
   }
 }

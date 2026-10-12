@@ -148,7 +148,9 @@ function renderStats() {
           <div><span class="muted">最大回撤</span><b class="down">${a.max_drawdown_pct.toFixed(1)}%</b></div>
         </div>
         <div class="muted">前半段 ${h1.trades || 0} 筆 期望值 ${h1.trades ? h1.expectancy_r.toFixed(3) + "R" : "—"}；後半段 ${h2.trades || 0} 筆 期望值 ${h2.trades ? h2.expectancy_r.toFixed(3) + "R" : "—"}</div>
-        ${a.expectancy_r < 0.1 ? `<p class="warn">期望值接近 0，優勢很小、可能只是運氣。先用小資金或只觀察。</p>` : ""}`);
+        ${a.expectancy_r <= 0 ? `<p class="warn">期望值是負的：照這個策略在${MARKET_LABEL[market]}上交易，長期是虧錢的。</p>`
+          : a.expectancy_r < 0.1 ? `<p class="warn">期望值接近 0，優勢很小、可能只是運氣。先用小資金或只觀察。</p>` : ""}
+        ${a.max_concurrent ? `<p class="warn">回測期間最多同時有 ${a.max_concurrent} 筆單在持倉（很多標的會一起出訊號、一起漲跌）。上面的回撤是一筆接一筆算的，同時持倉時虧損會疊加，實際回撤會更大。建議同時最多持有 3 筆。</p>` : ""}`);
     }
   }
   $("stats").innerHTML = parts.join("") ||
@@ -225,7 +227,7 @@ function renderList() {
   const counts = state.markets ? Object.entries(state.markets).map(([m, v]) => `${v.label} ${v.symbols}`).join("、") : `${state.symbols} 個`;
   $("foot").textContent = `監看 ${counts} · 週期 ${state.intervals.join("/")} · ` +
     `最後掃描 ${state.updated ? fmtTime(state.updated) : "—"}` +
-    (STATIC ? ` · 訊號約每 10 分鐘由 GitHub 排程更新 · ${market === "crypto" && livePricesAt ? "現價來自 Binance 合約即時價" : "現價為掃描時的派網價格"}`
+    (STATIC ? ` · 訊號約每 5 分鐘由 GitHub 排程更新 · ${market === "crypto" && livePricesAt ? "現價來自 Binance 合約即時價" : "現價為掃描時的派網價格"}`
       : " · 每 30 秒更新頁面");
 }
 

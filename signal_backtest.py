@@ -77,7 +77,7 @@ def main() -> int:
         Path("output").mkdir(exist_ok=True)
         STATS_PATH.parent.mkdir(exist_ok=True)
         if not trades.empty:
-            trades.to_csv(f"output/signal_trades_{strat.name}_{interval}.csv", index=False)
+            trades.to_csv(f"output/signal_trades_{strat.name}_{args.market}_{interval}.csv", index=False)
         a = summary["all"]
         if a.get("trades"):
             print(f"{interval}: {a['trades']} 筆，勝率 {a['win_rate']:.1%}，期望值 {a['expectancy_r']:+.3f}R，"
