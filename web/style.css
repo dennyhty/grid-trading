@@ -125,3 +125,7 @@ details .kv { display: grid; grid-template-columns: auto 1fr; gap: 2px 12px; fon
 .chip.warn-chip { color: var(--gold); border-color: rgba(217,180,90,.5); }
 .card .row1, .dh .row1 { flex-wrap: wrap; row-gap: 4px; }
 .side, .chip, .status, .dh .dir { white-space: nowrap; }
+.groups { border-top: 1px solid var(--line); margin-top: 10px; padding-top: 8px; }
+.groups table { width: 100%; border-collapse: collapse; font-size: 13px; margin: 6px 0; }
+.groups th { text-align: left; color: var(--muted); font-weight: 400; padding: 4px 2px; }
+.groups td { padding: 5px 2px; border-top: 1px solid var(--line); vertical-align: top; }

@@ -28,7 +28,7 @@ def trades_for(strategy: Strategy, df: pd.DataFrame, symbol: str, interval: str,
         out.append({
             "symbol": symbol, "side": sig.side, "time": sig.time, "exit_time": exit_time,
             "entry": sig.price, "r": res.realized_r, "pct": res.realized_pct, "tps_hit": res.tps_hit,
-            "exit": res.events[-1].kind, "bars": res.bars,
+            "exit": res.events[-1].kind, "bars": res.bars, "strict": sig.info.get("strict_rsi"),
         })
     return out
 
@@ -85,3 +85,22 @@ def split_summary(trades: pd.DataFrame, risk_per_trade: float = 0.01) -> dict:
         "end": int(trades["exit_time"].max().timestamp() * 1000),
         "symbols": int(trades["symbol"].nunique()),
     }
+
+
+def group_summary(trades: pd.DataFrame, since: str = "2024-01-01") -> dict:
+    """RSI 收緊觀察組：全部 / 收緊組也會進的 / 收緊組會剔除的，各自全期和 since 之後的筆數、勝率、平均 R。"""
+    if trades.empty or "strict" not in trades or trades["strict"].isna().all():
+        return {}
+    strict = trades["strict"].fillna(False).astype(bool)
+    recent = trades["time"] >= pd.Timestamp(since, tz="UTC")
+
+    def brief(t: pd.DataFrame) -> dict:
+        r = t["r"]
+        return {"trades": int(len(r)), "win_rate": float((r > 0).mean()) if len(r) else 0.0,
+                "expectancy_r": float(r.mean()) if len(r) else 0.0,
+                "se_r": float(r.std(ddof=1) / np.sqrt(len(r))) if len(r) > 1 else 0.0}
+
+    out = {"since": since}
+    for name, mask in (("all", strict | ~strict), ("strict", strict), ("excluded", ~strict)):
+        out[name] = {"full": brief(trades[mask]), "recent": brief(trades[mask & recent])}
+    return out

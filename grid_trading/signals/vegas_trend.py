@@ -5,6 +5,9 @@
   而且價格離通道不超過 max_ext_atr 倍 ATR（追太高不進）。
 - 停損：進場價 ∓ sl_atr 倍 ATR，風險記為 1R。
 - 停利：TP1/TP2/TP3 = 1R / 2R / 3R（倍數可調）。
+
+觀察組：每個訊號另外標記 info["strict_rsi"]，表示 RSI 收緊成多單 54~70、空單 30~46 時是否也會進場。
+只是標記，不影響進場；用來在實盤累積兩組的成績再決定要不要換。
 """
 
 from __future__ import annotations
@@ -26,12 +29,15 @@ class VegasTrend(Strategy):
 
     def __init__(self, sl_atr: float = 1.5, tp_r: tuple[float, float, float] = (1.0, 2.0, 3.0),
                  max_ext_atr: float = 3.0, rsi_long: tuple[float, float] = (50, 70),
-                 rsi_short: tuple[float, float] = (30, 50)):
+                 rsi_short: tuple[float, float] = (30, 50),
+                 strict_rsi_long: tuple[float, float] = (54, 70), strict_rsi_short: tuple[float, float] = (30, 46)):
         self.sl_atr = sl_atr
         self.tp_r = tuple(tp_r)
         self.max_ext_atr = max_ext_atr
         self.rsi_long = rsi_long
         self.rsi_short = rsi_short
+        self.strict_rsi_long = strict_rsi_long
+        self.strict_rsi_short = strict_rsi_short
 
     def prepare(self, df: pd.DataFrame) -> pd.DataFrame:
         df = df.copy()
@@ -74,11 +80,13 @@ class VegasTrend(Strategy):
         if (up and prev_hist <= 0 < hist and self.rsi_long[0] <= r.rsi <= self.rsi_long[1]
                 and r.close - top <= self.max_ext_atr * r.atr):
             info["reason"] = "價格在維加斯通道上方、通道向上；MACD 柱翻正；RSI 偏多未過熱"
+            info["strict_rsi"] = bool(self.strict_rsi_long[0] <= r.rsi <= self.strict_rsi_long[1])
             return LONG, r.close - risk, [r.close + k * risk for k in self.tp_r], info
 
         down = r.close < bottom and r.ema12 < bottom and r.ema144 < r.ema169
         if (down and prev_hist >= 0 > hist and self.rsi_short[0] <= r.rsi <= self.rsi_short[1]
                 and bottom - r.close <= self.max_ext_atr * r.atr):
             info["reason"] = "價格在維加斯通道下方、通道向下；MACD 柱翻負；RSI 偏空未超賣"
+            info["strict_rsi"] = bool(self.strict_rsi_short[0] <= r.rsi <= self.strict_rsi_short[1])
             return SHORT, r.close + risk, [r.close - k * risk for k in self.tp_r], info
         return None
