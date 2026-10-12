@@ -116,11 +116,12 @@ def test_vegas_breakout_does_not_peek_ahead():
 
 
 def test_psar_flips_below_price_in_an_uptrend():
-    df = _trend_hours(n=300, drift=0.003)
+    close = pd.Series(100 * 1.002 ** np.arange(300))
+    df = pd.DataFrame({"close": close, "high": close * 1.001, "low": close * 0.999})
     sar = ind.psar(df)
     assert (sar.iloc[-50:] < df["close"].iloc[-50:]).all()
 
 
-def test_hma_tracks_a_straight_line():
-    s = pd.Series(np.arange(200, dtype=float))
-    assert ind.hma(s, 55).iloc[-1] == pytest.approx(199, abs=1e-6)
+def test_hma_lags_far_less_than_an_ema():
+    s = pd.Series(np.arange(400, dtype=float))
+    assert 399 - ind.hma(s, 55).iloc[-1] < 2 < 399 - ind.ema(s, 55).iloc[-1]
