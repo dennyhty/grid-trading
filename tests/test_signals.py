@@ -88,3 +88,28 @@ def test_vegas_trend_only_uses_past_data():
     assert [s.time for s in cut] == [s.time for s in full if s.time <= df["time"].iloc[599] + pd.Timedelta("1h")]
     for s in full:
         assert (s.sl < s.price < s.tps[0]) if s.side == LONG else (s.sl > s.price > s.tps[0])
+
+
+def _trend_hours(n=1200, drift=0.0015, seed=1):
+    rng = np.random.default_rng(seed)
+    close = 100 * np.exp(np.cumsum(drift + 0.004 * rng.standard_normal(n)))
+    df = pd.DataFrame({"close": close, "open": close, "high": close * 1.003, "low": close * 0.997, "volume": 1.0})
+    df["time"] = pd.date_range(T0, periods=n, freq="h", tz="UTC")
+    return df
+
+
+def test_vegas_breakout_only_trades_with_the_4h_trend():
+    up = get("vegas_breakout", min_risk=0.0).scan(_trend_hours(drift=0.0015), "X_USDT_PERP", "60M")
+    down = get("vegas_breakout", min_risk=0.0).scan(_trend_hours(drift=-0.0015), "X_USDT_PERP", "60M")
+    assert up and all(s.side == LONG for s in up)
+    assert down and all(s.side == SHORT for s in down)
+    for s in up:
+        assert s.sl < s.price < s.tps[0] < s.tps[1] < s.tps[2]
+
+
+def test_vegas_breakout_does_not_peek_ahead():
+    df = _trend_hours()
+    strat = get("vegas_breakout", min_risk=0.0)
+    full = [s.time for s in strat.scan(df, "X", "60M")]
+    cut = [s.time for s in strat.scan(df.iloc[:900], "X", "60M")]
+    assert [t for t in full if t <= df["time"].iloc[899]] == cut

@@ -1,0 +1,108 @@
+"""維加斯趨勢 + 突破：4H 用維加斯通道定方向，1H 突破前 20 根高（低）點時進場。
+
+結合兩個策略：
+- 維加斯趨勢（vegas_trend）的方向判斷：4H 收盤和 EMA12 都在 EMA144/169 通道上方且通道向上 → 只做多，
+  反之只做空；4H MACD 柱同向而且在放大。
+- 群組訊號回推的突破進場（grid_trading/breakout.py）：1H 收盤突破前 20 根高點、站上 EMA20/50/144/169、
+  RSI 60~80（空單鏡像：跌破前 20 根低點、RSI 20~40）。
+- 停損：最近一個已確認的 1H 波段低點（高點）外 0.3%，距離需在 3%~12%。TP 為 1R/2R/3R。
+
+用 1H K 線跑，4H 指標由 1H 合成，只用已收盤的 4H K 線。
+"""
+
+from __future__ import annotations
+
+import pandas as pd
+
+from .. import indicators as ind
+from ..history import resample
+from .strategy import LONG, SHORT, Strategy, register
+
+
+@register
+class VegasBreakout(Strategy):
+    name = "vegas_breakout"
+    title = "維加斯趨勢 + 1H 突破"
+    description = ("4H 維加斯通道定方向（通道上方且向上只做多，下方且向下只做空），4H MACD 柱同向放大；"
+                   "1H 突破前 20 根高/低點時進場，停損放在最近的 1H 波段低/高點外。TP 為 1R/2R/3R。")
+    chart_emas = {"EMA20": 20, "EMA144": 144, "EMA169": 169}
+    min_bars = 200
+
+    def __init__(self, trend: str = "vegas", allow_short: bool = True, lookback: int = 20,
+                 rsi_long: tuple[float, float] = (60, 80), rsi_short: tuple[float, float] = (20, 40),
+                 pivot_k: int = 3, stop_buffer: float = 0.003, min_risk: float = 0.03, max_risk: float = 0.12,
+                 tp_r: tuple[float, float, float] = (1.0, 2.0, 3.0)):
+        # trend="vegas"：照 vegas_trend 的定義（收盤、EMA12 都在通道外，且通道方向一致）
+        # trend="basic"：只看 4H 收盤在通道上方/下方（群組訊號回推時用的寬鬆版）
+        self.trend = trend
+        self.allow_short = allow_short
+        self.lookback = lookback
+        self.rsi_long = rsi_long
+        self.rsi_short = rsi_short
+        self.pivot_k = pivot_k
+        self.stop_buffer = stop_buffer
+        self.min_risk = min_risk
+        self.max_risk = max_risk
+        self.tp_r = tuple(tp_r)
+
+    def prepare(self, df: pd.DataFrame) -> pd.DataFrame:
+        df = df.copy()
+        c, low, high = df["close"], df["low"], df["high"]
+        for n in (20, 50, 144, 169):
+            df[f"ema{n}"] = ind.ema(c, n)
+        df["rsi"] = ind.rsi(c)
+        df["prior_high"] = high.shift(1).rolling(self.lookback).max()
+        df["prior_low"] = low.shift(1).rolling(self.lookback).min()
+        k = self.pivot_k
+        # 波段高低點要等右邊 k 根收完才確認，所以往後移 k 根
+        df["swing_low"] = low.where(low == low.rolling(2 * k + 1, center=True).min()).ffill().shift(k)
+        df["swing_high"] = high.where(high == high.rolling(2 * k + 1, center=True).max()).ffill().shift(k)
+        df["low24"] = low.rolling(24).min()
+        df["high24"] = high.rolling(24).max()
+
+        h4 = resample(df[["time", "open", "high", "low", "close", "volume"]], "4h")
+        hc = h4["close"]
+        e12, e144, e169 = ind.ema(hc, 12), ind.ema(hc, 144), ind.ema(hc, 169)
+        top, bottom = pd.concat([e144, e169], axis=1).max(axis=1), pd.concat([e144, e169], axis=1).min(axis=1)
+        hist = ind.macd(hc)["hist"]
+        if self.trend == "vegas":
+            up = (hc > top) & (e12 > top) & (e144 > e169)
+            down = (hc < bottom) & (e12 < bottom) & (e144 < e169)
+        else:
+            up, down = hc > top, hc < bottom
+        h4f = pd.DataFrame({
+            "avail": h4["time"] + pd.Timedelta(hours=4),  # 這根 4H 收盤後才能用
+            "h4_up": up & (hist > 0) & (hist > hist.shift(1)),
+            "h4_down": down & (hist < 0) & (hist < hist.shift(1)),
+        })
+        df["bar_close"] = df["time"] + pd.Timedelta(hours=1)
+        df = pd.merge_asof(df, h4f, left_on="bar_close", right_on="avail", direction="backward")
+        df[["h4_up", "h4_down"]] = df[["h4_up", "h4_down"]].fillna(False).astype(bool)
+        return df.drop(columns=["avail", "bar_close"])
+
+    def check(self, df: pd.DataFrame, i: int):
+        close = df["close"].iat[i]
+        long_ok = df["h4_up"].iat[i] and close > df["prior_high"].iat[i]
+        short_ok = self.allow_short and df["h4_down"].iat[i] and close < df["prior_low"].iat[i]
+        if not (long_ok or short_ok):
+            return None  # 先用最便宜的條件過濾，回測才不會慢
+        r = df.iloc[i]
+        info = {"rsi": round(float(r.rsi), 2), "ema144": float(r.ema144), "ema169": float(r.ema169),
+                "candle": {"open": float(r.open), "high": float(r.high), "low": float(r.low),
+                           "close": float(r.close), "time": int(r.time.timestamp() * 1000)}}
+        emas = [r[f"ema{n}"] for n in (20, 50, 144, 169)]
+        if long_ok and all(close > e for e in emas) and self.rsi_long[0] <= r.rsi <= self.rsi_long[1]:
+            base = r.swing_low if r.swing_low < close else r.low24
+            stop = base * (1 - self.stop_buffer)
+            risk = close - stop
+            if self.min_risk <= risk / close <= self.max_risk:
+                info["reason"] = "4H 維加斯通道向上、MACD 柱放大；1H 突破前 20 根高點；停損在 1H 波段低點下方"
+                return LONG, stop, [close + k * risk for k in self.tp_r], info
+        if short_ok and all(close < e for e in emas) and self.rsi_short[0] <= r.rsi <= self.rsi_short[1]:
+            base = r.swing_high if r.swing_high > close else r.high24
+            stop = base * (1 + self.stop_buffer)
+            risk = stop - close
+            if self.min_risk <= risk / close <= self.max_risk:
+                info["reason"] = "4H 維加斯通道向下、MACD 柱放大；1H 跌破前 20 根低點；停損在 1H 波段高點上方"
+                return SHORT, stop, [close - k * risk for k in self.tp_r], info
+        return None
