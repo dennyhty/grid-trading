@@ -16,6 +16,7 @@ import argparse
 import json
 import shutil
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from grid_trading import signals
@@ -40,7 +41,7 @@ def main() -> int:
     p.add_argument("--previous", help="上一次的 notifications.json，用來接續通知紀錄")
     p.add_argument("--ledger", help="上一次的 ledger.json（實盤紀錄），沒有就從頭開始")
     p.add_argument("--strategies", nargs="+", default=["vegas_trend"], choices=sorted(signals.REGISTRY))
-    p.add_argument("--intervals", nargs="+", default=["4H"])
+    p.add_argument("--intervals", nargs="+", default=["4H", "2H"])
     p.add_argument("--crypto-list", choices=["top100", "volume"], default="top100",
                    help="加密貨幣：市值前 100 名（預設），或 24h 成交額 >= --min-volume")
     p.add_argument("--min-volume", type=float, default=5e6, help="加密貨幣 24h 成交額下限 (USDT)")
@@ -66,16 +67,26 @@ def main() -> int:
     state["static"] = True
 
     previous = json.loads(Path(args.ledger).read_text()) if args.ledger and Path(args.ledger).exists() else []
-    book = ledger_mod.update(previous, state["signals"], lambda sym, iv: fetch_klines(engine.api, sym, iv, 1000),
+    book = ledger_mod.update(previous, state["signals"], lambda sym, iv: fetch_klines(engine.client(), sym, iv, 1000),
                              engine.fee)
     write_json(data / "ledger.json", book)
     state["ledger"] = ledger_mod.summary(book)
     write_json(data / "state.json", state)
 
     pairs = {(s["symbol"], s["interval"], s["strategy"]) for s in state["signals"]}
+    charts: dict[tuple[str, str], tuple[str, int]] = {}  # (幣, 週期) → (策略, 根數)；訊號本身的週期多抓一些
     for sym, sig_iv, strat in sorted(pairs):
         for iv in dict.fromkeys([sig_iv, *CHART_INTERVALS]):
-            write_json(data / "chart" / f"{sym}_{iv}.json", engine.chart(sym, iv, strat, 1000 if iv == sig_iv else 700))
+            bars = 1000 if iv == sig_iv else 700
+            if charts.get((sym, iv), ("", 0))[1] < bars:
+                charts[(sym, iv)] = (strat, bars)
+
+    def write_chart(job):
+        (sym, iv), (strat, bars) = job
+        write_json(data / "chart" / f"{sym}_{iv}.json", engine.chart(sym, iv, strat, bars))
+
+    with ThreadPoolExecutor(engine.workers) as ex:
+        list(ex.map(write_chart, charts.items()))
     print(f"{len(state['signals'])} 個訊號，{len(pairs)} 個幣的圖表，輸出到 {out}", file=sys.stderr)
     return 0
 
