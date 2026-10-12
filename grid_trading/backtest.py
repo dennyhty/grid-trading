@@ -24,7 +24,7 @@ ANCHOR = pd.Timestamp("2025-01-01", tz="UTC")
 
 @dataclass(frozen=True)
 class Variant:
-    direction: str = "vegas"      # vegas：用維加斯通道定方向；neutral：一律中性
+    direction: str = "vegas"      # vegas：用維加斯通道定方向；neutral：一律中性；long：一律做多
     filtered: bool = True         # True：只在震盪條件成立時開單
     hold_days: int = 7
     stop_atr_mult: float = 1.0
@@ -34,7 +34,7 @@ class Variant:
 
     def label(self) -> str:
         exit_ = f"|ADX>{self.exit_adx:g}收網" if self.exit_adx is not None else ""
-        return (f"{'順勢' if self.direction == 'vegas' else '中性'}"
+        return (f"{ {'vegas': '順勢', 'neutral': '中性', 'long': '只做多'}[self.direction] }"
                 f"|{'過濾' if self.filtered else '不過濾'}"
                 f"|{self.hold_days}天|停損{self.stop_atr_mult:g}ATR{exit_}")
 
@@ -57,9 +57,9 @@ def windows(h1: pd.DataFrame, variant: Variant, cfg: ScreenConfig, symbol: str, 
         future = h1[(times >= t) & (times < t + step)]
         t_start = t
         t += step
-        if r is None or len(future) < 24:
+        if r is None or len(future) < 6:
             continue
-        mode = NEUTRAL if variant.direction == "neutral" else r["direction"]
+        mode = {"neutral": NEUTRAL, "long": LONG}.get(variant.direction, r["direction"])
         tradable = (
             r["in_range"]
             and r["range_width_pct"] <= MAX_RANGE_WIDTH_PCT

@@ -26,7 +26,9 @@ def main() -> int:
     p.add_argument("--symbols", nargs="*", help="只測指定幣種")
     p.add_argument("--fee", type=float, default=0.0005, help="每次成交手續費率，預設 0.05%%")
     p.add_argument("--refresh", action="store_true", help="重新下載歷史資料")
-    p.add_argument("--suite", choices=["base", "exits"], default="exits",
+    p.add_argument("--interval", choices=["60M", "4H"], default="60M",
+                   help="模擬用的 K 線。60M 約可回溯 14 個月；4H 可回溯到 2023 年初，但同一根 K 線內的來回會被忽略")
+    p.add_argument("--suite", choices=["base", "exits", "cycle"], default="exits",
                    help="base：第一輪 24 組；exits：加入提早收網與更緊停損的改良版")
     p.add_argument("--tag", default="", help="輸出檔名後綴")
     args = p.parse_args()
@@ -41,15 +43,21 @@ def main() -> int:
 
     data = {}
     for sym in symbols:
-        df = fetch_history(sym, "60M", args.days, args.refresh)
-        if len(df) > 24 * 60:
+        df = fetch_history(sym, args.interval, args.days, args.refresh)
+        if (df["time"].iloc[-1] - df["time"].iloc[0]).days > 60 if len(df) else False:
             data[sym] = df
-        print(f"  {sym}: {len(df)} 根 1H K 線", file=sys.stderr)
+        print(f"  {sym}: {len(df)} 根 {args.interval} K 線", file=sys.stderr)
 
     if args.suite == "base":
         variants = [
             Variant(direction=d, filtered=f, hold_days=h, stop_atr_mult=s)
             for d, f, h, s in itertools.product(["vegas", "neutral"], [True, False], [3, 7, 14], [1.0, 2.0])
+        ]
+    elif args.suite == "cycle":
+        # 長週期：比較順勢、中性、只做多，都只在震盪時開、不加提早收網
+        variants = [
+            Variant(direction=d, filtered=True, hold_days=h, stop_atr_mult=s)
+            for d, h, s in itertools.product(["vegas", "neutral", "long"], [7, 14], [0.5, 1.0])
         ]
     else:
         # 第一輪發現：過濾一定要開、持有久一點較好，所以只在這個基礎上改出場規則
