@@ -1,0 +1,80 @@
+"""網格回測：python backtest.py
+
+用一年多的 1H K 線，滾動檢驗篩選器的開單規則，比較不同參數組合。
+前半段時間當「訓練期」挑參數，後半段當「驗證期」確認不是巧合。
+"""
+
+from __future__ import annotations
+
+import argparse
+import itertools
+import sys
+from pathlib import Path
+
+import pandas as pd
+
+from grid_trading.backtest import Variant, summarize, windows
+from grid_trading.history import fetch_history
+from grid_trading.pionex import PionexPublic
+from grid_trading.screener import ScreenConfig
+
+
+def main() -> int:
+    p = argparse.ArgumentParser(description="派網合約網格回測")
+    p.add_argument("--days", type=int, default=420, help="抓多少天的 1H 歷史，預設 420")
+    p.add_argument("--min-volume", type=float, default=5e6, help="24h 成交額下限 (USDT)")
+    p.add_argument("--symbols", nargs="*", help="只測指定幣種")
+    p.add_argument("--fee", type=float, default=0.0005, help="每次成交手續費率，預設 0.05%%")
+    p.add_argument("--refresh", action="store_true", help="重新下載歷史資料")
+    args = p.parse_args()
+
+    if args.symbols:
+        symbols = args.symbols
+    else:
+        api = PionexPublic()
+        tickers = api.perp_tickers()
+        liquid = set(tickers.loc[tickers["amount"] >= args.min_volume, "symbol"])
+        symbols = sorted(s for s in api.perp_symbols() if s in liquid)
+
+    data = {}
+    for sym in symbols:
+        df = fetch_history(sym, "60M", args.days, args.refresh)
+        if len(df) > 24 * 60:
+            data[sym] = df
+        print(f"  {sym}: {len(df)} 根 1H K 線", file=sys.stderr)
+
+    variants = [
+        Variant(direction=d, filtered=f, hold_days=h, stop_atr_mult=s)
+        for d, f, h, s in itertools.product(["vegas", "neutral"], [True, False], [3, 7, 14], [1.0, 2.0])
+    ]
+    cfg = ScreenConfig()
+    all_rows, summary = [], []
+    for v in variants:
+        rows = []
+        for sym, df in data.items():
+            rows += windows(df, v, cfg, sym, args.fee)
+        res = pd.DataFrame(rows)
+        if res.empty:
+            continue
+        res["variant"] = v.label()
+        all_rows.append(res)
+        mid = res["start"].min() + (res["start"].max() - res["start"].min()) / 2
+        for period, part in (("全部", res), ("前半(訓練)", res[res["start"] < mid]), ("後半(驗證)", res[res["start"] >= mid])):
+            summary.append({"組合": v.label(), "期間": period, **summarize(part, v.hold_days)})
+        print(f"  完成 {v.label()}", file=sys.stderr)
+
+    out = Path("output")
+    out.mkdir(exist_ok=True)
+    pd.concat(all_rows).to_csv(out / "backtest_windows.csv", index=False, encoding="utf-8-sig")
+    table = pd.DataFrame(summary)
+    table.to_csv(out / "backtest_summary.csv", index=False, encoding="utf-8-sig")
+
+    with pd.option_context("display.width", 250, "display.max_columns", None, "display.max_rows", 200,
+                           "display.float_format", "{:.2f}".format):
+        print(table[table["期間"] == "全部"].sort_values("組合年化%", ascending=False).to_string(index=False))
+    print(f"\n完整結果：{out / 'backtest_summary.csv'}、{out / 'backtest_windows.csv'}", file=sys.stderr)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

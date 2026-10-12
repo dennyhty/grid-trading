@@ -43,3 +43,12 @@ python -m pytest                  # 測試
 - **停損**：區間外 1 倍 ATR。做多網格只設下方停損，做空網格只設上方停損，中性兩邊都設。
 
 這些是第 1 步的初步參數，第 2 步回測後會再調整。
+
+## 回測
+
+```bash
+python backtest.py                # 抓約 14 個月 1H K 線（快取在 data/），跑 24 種參數組合
+```
+
+每隔 3/7/14 天，只用當時以前的資料跑篩選器取得參數，再用之後的 K 線模擬網格（含手續費、停損），
+前半段當訓練期、後半段當驗證期。結果在 `output/backtest_summary.csv` 和 `output/backtest_windows.csv`。
