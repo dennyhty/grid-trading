@@ -78,7 +78,10 @@ CRO、MNT、OKB、PI 幣安沒有合約，所以是 83 個幣）。網頁以幣�
   設定方式：在 Telegram 找 @BotFather 用 `/newbot` 建一個 Bot 拿到 token，打開自己的 Bot 按「開始」，
   再找 @userinfobot 拿到自己的 Id；然後到 repo 的 Settings → Secrets and variables → Actions 新增
   `TELEGRAM_BOT_TOKEN` 和 `TELEGRAM_CHAT_ID` 兩個 secret。沒設定就不推。token 不要寫進任何檔案。
-- 公開 repo 的 GitHub Actions 免費；repo 超過 60 天沒有任何 commit，GitHub 會暫停排程，到 Actions 頁面重新啟用即可。
+- GitHub 內建的定時排程在這個 repo 一直沒有觸發，所以另外有 `.github/workflows/ticker.yml`（訊號定時器）：
+  一個工作每 5 分鐘觸發一次訊號網頁，跑約 5 小時 40 分後自己接力開下一個。中斷時到 Actions → 訊號定時器 → Run workflow 重新啟動；
+  要停就在同一頁 Disable workflow。這種一直開著的用法在 GitHub 規範裡算灰色地帶，有可能被 GitHub 停掉。
+- 公開 repo 的 GitHub Actions 免費。
 
 ### 美股、商品（RWA）
 
