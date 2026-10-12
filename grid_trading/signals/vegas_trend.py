@@ -45,6 +45,12 @@ class VegasTrend(Strategy):
         df["atr"] = ind.atr(df)
         return df
 
+    def candidates(self, df: pd.DataFrame):
+        # 和 check() 開頭的條件相同：MACD 柱由負翻正或由正翻負
+        h = df["hist"]
+        prev = h.shift(1)
+        return (((prev <= 0) & (h > 0)) | ((prev >= 0) & (h < 0))).to_numpy()
+
     def check(self, df: pd.DataFrame, i: int):
         h = df["hist"]
         prev_hist, hist = h.iat[i - 1], h.iat[i]

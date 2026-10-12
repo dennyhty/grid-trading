@@ -181,6 +181,14 @@ class VegasBreakout(Strategy):
         opposite = r.oil_down if side == LONG else r.oil_up
         return bool(same if self.oil == "with" else opposite)
 
+    def candidates(self, df: pd.DataFrame):
+        # 和 check() 開頭的便宜條件相同：大週期方向對、而且收盤突破前 N 根高（低）點
+        c = df["close"]
+        mask = df["h4_up"] & (c > df["prior_high"])
+        if self.allow_short:
+            mask |= df["h4_down"] & (c < df["prior_low"])
+        return mask.to_numpy()
+
     def check(self, df: pd.DataFrame, i: int):
         close = df["close"].iat[i]
         long_ok = df["h4_up"].iat[i] and close > df["prior_high"].iat[i]

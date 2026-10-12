@@ -136,3 +136,27 @@ def test_psar_flips_below_price_in_an_uptrend():
 def test_hma_lags_far_less_than_an_ema():
     s = pd.Series(np.arange(400, dtype=float))
     assert 399 - ind.hma(s, 55).iloc[-1] < 2 < 399 - ind.ema(s, 55).iloc[-1]
+
+
+def test_candidate_prefilter_gives_the_same_signals_as_checking_every_bar():
+    # 趨勢一下上一下下的隨機走勢，兩個策略都會有多有空
+    rng = np.random.default_rng(3)
+    n = 3000
+    close = 100 * np.exp(np.cumsum(0.0005 * np.sin(np.arange(n) / 200) + 0.01 * rng.standard_normal(n)))
+    df = pd.DataFrame({"close": close, "open": np.r_[close[0], close[:-1]], "high": close * 1.004,
+                       "low": close * 0.996, "volume": 1.0})
+    df["time"] = pd.date_range(T0, periods=n, freq="h", tz="UTC")
+    for strat in (get("vegas_breakout", min_risk=0.0), get("vegas_trend")):
+        fast = strat.scan(df, "X", "60M")
+        strat.candidates = lambda d: None  # 退回逐根檢查
+        slow = strat.scan(df, "X", "60M")
+        assert fast and [(s.time, s.side, s.sl, s.tps) for s in fast] == [(s.time, s.side, s.sl, s.tps) for s in slow]
+
+
+def test_binance_clean_drops_delisted_flat_bars_and_keeps_the_last_listing():
+    from grid_trading.binance_history import clean
+    day = 86_400_000
+    old = pd.DataFrame({"time": [i * day for i in range(5)], "volume": [1, 1, 1, 0, 0]})
+    new = pd.DataFrame({"time": [(100 + i) * day for i in range(3)], "volume": [1, 1, 1]})
+    out = clean(pd.concat([old, new]).assign(open=1.0, high=1.0, low=1.0, close=1.0))
+    assert out["time"].tolist() == [100 * day, 101 * day, 102 * day]

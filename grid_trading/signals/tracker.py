@@ -53,12 +53,18 @@ def breakeven(sig: Signal, fee: float) -> float:
 
 
 def track(sig: Signal, candles: pd.DataFrame, fee: float = 0.0005, max_bars: int = 240) -> TrackResult:
-    """candles：訊號之後的 K 線（time 是開盤時間，第一根開盤時間 >= 訊號時間），由舊到新。"""
+    """candles：K 線（time 是開盤時間），由舊到新。只看開盤時間 >= 訊號時間的部分。"""
     d = sig.direction
     risk = abs(sig.price - sig.sl)
     be = breakeven(sig, fee)
     res = TrackResult(status="OPEN", stop=sig.sl, be=be)
-    after = candles[candles["time"] >= sig.time]
+    # 只取訊號後最多 max_bars 根，轉成 list 逐根跑（iterrows 很慢，回測時會被呼叫上千次）
+    start = int(candles["time"].searchsorted(sig.time, side="left"))
+    end = len(candles) if max_bars is None else min(len(candles), start + max_bars)
+    times = candles["time"].iloc[start:end].tolist()
+    highs = candles["high"].iloc[start:end].tolist()
+    lows = candles["low"].iloc[start:end].tolist()
+    closes = candles["close"].iloc[start:end].tolist()
 
     def close_part(portion: float, price: float):
         move = d * (price - sig.price)
@@ -67,10 +73,9 @@ def track(sig: Signal, candles: pd.DataFrame, fee: float = 0.0005, max_bars: int
         res.realized_pct += portion * (move - cost) / sig.price * 100
         res.remaining -= portion
 
-    for _, k in after.iterrows():
+    for t, high, low, close in zip(times, highs, lows, closes):
         res.bars += 1
-        t = k["time"]
-        adverse = k["low"] if d > 0 else k["high"]
+        adverse = low if d > 0 else high
         if d * (adverse - res.stop) <= 0:
             price = res.stop
             if res.tps_hit == 0:
@@ -83,7 +88,7 @@ def track(sig: Signal, candles: pd.DataFrame, fee: float = 0.0005, max_bars: int
             res.events.append(Event(kind, t, price, text))
             res.status = "CLOSED"
             break
-        favorable = k["high"] if d > 0 else k["low"]
+        favorable = high if d > 0 else low
         while res.tps_hit < len(sig.tps) and d * (favorable - sig.tps[res.tps_hit]) >= 0:
             n = res.tps_hit
             tp = sig.tps[n]
@@ -99,8 +104,8 @@ def track(sig: Signal, candles: pd.DataFrame, fee: float = 0.0005, max_bars: int
             res.status = "CLOSED"
             break
         if res.bars >= max_bars:
-            close_part(res.remaining, float(k["close"]))
-            res.events.append(Event("TIMEOUT", t, float(k["close"]), f"超過 {max_bars} 根未結束，收盤平倉"))
+            close_part(res.remaining, float(close))
+            res.events.append(Event("TIMEOUT", t, float(close), f"超過 {max_bars} 根未結束，收盤平倉"))
             res.status = "CLOSED"
             break
     return res
