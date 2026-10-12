@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
 
+import numpy as np
 import pandas as pd
 
 LONG = "LONG"
@@ -52,13 +53,23 @@ class Strategy:
         """第 i 根收盤時是否觸發。觸發就回傳 (side, sl, [tp1, tp2, tp3], info)，否則 None。"""
         raise NotImplementedError
 
+    def candidates(self, df: pd.DataFrame):
+        """（可選）用向量運算先挑出可能觸發的 K 線，回傳布林陣列；只有 True 的那幾根才呼叫 check()。
+
+        必須涵蓋 check() 可能觸發的每一根（只能多不能少），結果才會和逐根檢查一樣。回傳 None 表示每根都檢查。
+        """
+        return None
+
     def scan(self, df: pd.DataFrame, symbol: str, interval: str, start: int | None = None) -> list[Signal]:
         """回傳 df 中從 start 起所有觸發的訊號（依時間）。df 每一根都必須已收盤。"""
         df = self.prepare(df.reset_index(drop=True))
         bar = _bar_length(df)
         out = []
-        for i in range(max(start or 0, self.min_bars), len(df)):
-            hit = self.check(df, i)
+        first = max(start or 0, self.min_bars)
+        mask = self.candidates(df)
+        rows = range(first, len(df)) if mask is None else (i for i in np.flatnonzero(mask) if i >= first)
+        for i in rows:
+            hit = self.check(df, int(i))
             if hit is None:
                 continue
             side, sl, tps, info = hit

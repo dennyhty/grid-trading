@@ -88,3 +88,75 @@ def test_vegas_trend_only_uses_past_data():
     assert [s.time for s in cut] == [s.time for s in full if s.time <= df["time"].iloc[599] + pd.Timedelta("1h")]
     for s in full:
         assert (s.sl < s.price < s.tps[0]) if s.side == LONG else (s.sl > s.price > s.tps[0])
+
+
+def _trend_hours(n=1200, drift=0.0015, seed=1, freq="h"):
+    rng = np.random.default_rng(seed)
+    close = 100 * np.exp(np.cumsum(drift + 0.004 * rng.standard_normal(n)))
+    df = pd.DataFrame({"close": close, "open": close, "high": close * 1.003, "low": close * 0.997, "volume": 1.0})
+    df["time"] = pd.date_range(T0, periods=n, freq=freq, tz="UTC")
+    return df
+
+
+def test_vegas_breakout_only_trades_with_the_4h_trend():
+    up = get("vegas_breakout", min_risk=0.0).scan(_trend_hours(drift=0.0015), "X_USDT_PERP", "60M")
+    down = get("vegas_breakout", min_risk=0.0).scan(_trend_hours(drift=-0.0015), "X_USDT_PERP", "60M")
+    assert up and all(s.side == LONG for s in up)
+    assert down and all(s.side == SHORT for s in down)
+    for s in up:
+        assert s.sl < s.price < s.tps[0] < s.tps[1] < s.tps[2]
+
+
+def test_vegas_breakout_does_not_peek_ahead():
+    df = _trend_hours()
+    strat = get("vegas_breakout", min_risk=0.0)
+    full = [s.time for s in strat.scan(df, "X", "60M")]
+    cut = [s.time for s in strat.scan(df.iloc[:900], "X", "60M")]
+    assert [t for t in full if t <= df["time"].iloc[899]] == cut
+
+
+def test_vegas_breakout_on_daily_bars_waits_for_trend_warmup_and_does_not_peek():
+    df = _trend_hours(n=1000, drift=0.0015, freq="D")
+    strat = get("vegas_breakout", min_risk=0.0, max_risk=0.5)
+    full = strat.scan(df, "X", "1D")
+    assert full and all(s.side == LONG for s in full)
+    # 大週期是 4 日線，要先有 169 根（676 天）才判斷方向
+    assert min(s.time for s in full) > df["time"].iloc[0] + pd.Timedelta(days=676)
+    cut = [s.time for s in strat.scan(df.iloc[:850], "X", "1D")]
+    assert [s.time for s in full if s.time <= df["time"].iloc[849] + pd.Timedelta(days=1)] == cut
+
+
+def test_psar_flips_below_price_in_an_uptrend():
+    close = pd.Series(100 * 1.002 ** np.arange(300))
+    df = pd.DataFrame({"close": close, "high": close * 1.001, "low": close * 0.999})
+    sar = ind.psar(df)
+    assert (sar.iloc[-50:] < df["close"].iloc[-50:]).all()
+
+
+def test_hma_lags_far_less_than_an_ema():
+    s = pd.Series(np.arange(400, dtype=float))
+    assert 399 - ind.hma(s, 55).iloc[-1] < 2 < 399 - ind.ema(s, 55).iloc[-1]
+
+
+def test_candidate_prefilter_gives_the_same_signals_as_checking_every_bar():
+    # 趨勢一下上一下下的隨機走勢，兩個策略都會有多有空
+    rng = np.random.default_rng(3)
+    n = 3000
+    close = 100 * np.exp(np.cumsum(0.0005 * np.sin(np.arange(n) / 200) + 0.01 * rng.standard_normal(n)))
+    df = pd.DataFrame({"close": close, "open": np.r_[close[0], close[:-1]], "high": close * 1.004,
+                       "low": close * 0.996, "volume": 1.0})
+    df["time"] = pd.date_range(T0, periods=n, freq="h", tz="UTC")
+    for strat in (get("vegas_breakout", min_risk=0.0), get("vegas_trend")):
+        fast = strat.scan(df, "X", "60M")
+        strat.candidates = lambda d: None  # 退回逐根檢查
+        slow = strat.scan(df, "X", "60M")
+        assert fast and [(s.time, s.side, s.sl, s.tps) for s in fast] == [(s.time, s.side, s.sl, s.tps) for s in slow]
+
+
+def test_binance_clean_drops_delisted_flat_bars_and_keeps_the_last_listing():
+    from grid_trading.binance_history import clean
+    day = 86_400_000
+    old = pd.DataFrame({"time": [i * day for i in range(5)], "volume": [1, 1, 1, 0, 0]})
+    new = pd.DataFrame({"time": [(100 + i) * day for i in range(3)], "volume": [1, 1, 1]})
+    out = clean(pd.concat([old, new]).assign(open=1.0, high=1.0, low=1.0, close=1.0))
+    assert out["time"].tolist() == [100 * day, 101 * day, 102 * day]
