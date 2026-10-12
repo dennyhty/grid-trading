@@ -10,6 +10,8 @@ const KIND_TEXT = { TP1: "TP1 觸及", TP2: "TP2 觸及", TP3: "TP3 觸及", STO
 
 let state = null;
 let tab = "OPEN";
+let market = (() => { try { return localStorage.getItem("market") || "crypto"; } catch { return "crypto"; } })();
+const MARKET_LABEL = { crypto: "加密貨幣", stock: "美股", commodity: "商品" };
 let current = null;          // 目前打開的訊號
 let chart = null, candleSeries = null, emaSeries = {}, priceLines = [];
 let chartData = null;
@@ -42,6 +44,19 @@ function ago(ms) {
   return `${Math.round(m / 1440)} 天前觸發`;
 }
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+const mk = (s) => s.market || "crypto";
+/** 顯示名稱：加密貨幣是 BTC/USDT，美股是 NVDA，商品是 XAU（黃金）。 */
+function nameHtml(s, withMarket = false) {
+  if (mk(s) === "crypto") return `${pair(s.symbol).split("/")[0]}<small>/USDT</small>`;
+  return `${esc(s.name || s.symbol)}${withMarket ? `<small> ${MARKET_LABEL[mk(s)]}</small>` : ""}`;
+}
+/** 回測數字：加密貨幣存在 stats[策略][週期]，美股/商品存在 stats[策略]["類別|週期"]。 */
+function statsFor(strategy, mkt, interval) {
+  const st = state.stats[strategy] || {};
+  return st[mkt === "crypto" ? interval : `${mkt}|${interval}`];
+}
+const tested = (s) => !!(statsFor(s.strategy, mk(s), s.interval) || {}).all?.trades;
 
 // ---------- 計算 ----------
 function dir(s) { return s.side === "LONG" ? 1 : -1; }
@@ -84,6 +99,7 @@ async function loadLivePrices() {
 function applyLivePrices() {
   for (const s of state.signals) {
     s.liveSource = "snapshot";
+    if (mk(s) !== "crypto") continue; // Binance 大多沒有美股/商品，用掃描時的派網價格
     const p = livePrices[s.symbol.replace("_USDT_PERP", "USDT")];
     // 名稱相同但不是同一個商品（例如代幣化股票）時價差會很大，這種就不用
     if (p && s.live && Math.abs(p / s.live - 1) < 0.05) { s.live = p; s.liveSource = "binance"; }
@@ -110,15 +126,19 @@ async function refresh() {
 function renderStats() {
   const parts = [];
   for (const [name, st] of Object.entries(state.strategies)) {
-    for (const iv of Object.keys((state.stats[name] || {}))) {
-      if (!state.intervals.includes(lbl(iv))) continue;
-      const s = state.stats[name][iv];
+    for (const iv of state.intervals.map((x) => (x === "1H" ? "60M" : x))) {
+      const s = statsFor(name, market, iv);
+      if (!s) {
+        parts.push(`<h3>${esc(st.title)} · ${lbl(iv)} · ${MARKET_LABEL[market]}</h3>
+          <p class="warn">這個策略還沒有在${MARKET_LABEL[market]}上回測過，勝率和期望值未知。下面的訊號只能參考，不建議照著下單。</p>`);
+        continue;
+      }
       const a = s.all || {};
       if (!a.trades) continue;
       const h1 = s.first_half || {}, h2 = s.second_half || {};
       const ok = a.expectancy_r > 0;
-      parts.push(`<h3>${esc(st.title)} · ${lbl(iv)} 回測</h3>
-        <div class="muted">${fmtTime(s.start, false).slice(0, 10)} ~ ${fmtTime(s.end, false).slice(0, 10)}，${s.symbols} 個幣，含手續費 ${(s.fee * 100).toFixed(2)}%/次</div>
+      parts.push(`<h3>${esc(st.title)} · ${lbl(iv)} · ${MARKET_LABEL[market]} 回測</h3>
+        <div class="muted">${fmtTime(s.start, false).slice(0, 10)} ~ ${fmtTime(s.end, false).slice(0, 10)}，${s.symbols} 個標的，含手續費 ${(s.fee * 100).toFixed(2)}%/次</div>
         <div class="grid">
           <div><span class="muted">勝率</span><b>${(a.win_rate * 100).toFixed(1)}%</b></div>
           <div><span class="muted">期望值 / 筆</span><b class="${ok ? "up" : "down"}">${a.expectancy_r >= 0 ? "+" : ""}${a.expectancy_r.toFixed(3)}R</b></div>
@@ -176,8 +196,9 @@ function cardHtml(s) {
   const title = (state.strategies[s.strategy] || {}).title || s.strategy;
   return `<div class="panel card" data-id="${esc(s.id)}">
     <div class="row1"><span class="side ${s.side}">${s.side === "LONG" ? "做多" : "做空"}</span>
-      <span class="pair">${pair(s.symbol).split("/")[0]}<small>/USDT</small></span>
-      <span class="chip">${s.label}</span><span class="status ${st.cls}">${st.text}</span></div>
+      <span class="pair">${nameHtml(s)}</span>
+      <span class="chip">${s.label}</span>${tested(s) ? "" : `<span class="chip warn-chip">未回測</span>`}
+      <span class="status ${st.cls}">${st.text}</span></div>
     <div class="meta">${esc(title)} · ${ago(s.time)} · 訊號價 ${fp(s.price)}</div>
     <div class="pnl"><div class="big num ${pnl >= 0 ? "up" : "down"}">${pct(pnl)}<small>${s.track.status === "OPEN" ? "未實現盈虧" : "已實現盈虧"}（1x）</small></div>
       <div class="right num">價格 ${pct(mv)}<br>現價 ${fp(price, s.price)}</div></div>
@@ -188,16 +209,23 @@ function cardHtml(s) {
 
 function renderList() {
   renderStats();
-  const open = state.signals.filter((s) => s.track.status === "OPEN");
-  const closed = state.signals.filter((s) => s.track.status !== "OPEN");
+  document.querySelectorAll(".mtab").forEach((b) => {
+    const m = b.dataset.market;
+    b.classList.toggle("active", m === market);
+    b.querySelector("span").textContent = state.signals.filter((s) => mk(s) === m && s.track.status === "OPEN").length || "";
+  });
+  const mine = state.signals.filter((s) => mk(s) === market);
+  const open = mine.filter((s) => s.track.status === "OPEN");
+  const closed = mine.filter((s) => s.track.status !== "OPEN");
   $("n-open").textContent = open.length;
   $("n-closed").textContent = closed.length;
   const shown = tab === "OPEN" ? open : closed;
   $("cards").innerHTML = shown.map(cardHtml).join("") ||
     `<div class="empty">${tab === "OPEN" ? "目前沒有進行中的訊號" : "最近沒有已結束的訊號"}</div>`;
-  $("foot").textContent = `監看 ${state.symbols} 個幣 · 週期 ${state.intervals.join("/")} · ` +
+  const counts = state.markets ? Object.entries(state.markets).map(([m, v]) => `${v.label} ${v.symbols}`).join("、") : `${state.symbols} 個`;
+  $("foot").textContent = `監看 ${counts} · 週期 ${state.intervals.join("/")} · ` +
     `最後掃描 ${state.updated ? fmtTime(state.updated) : "—"}` +
-    (STATIC ? ` · 訊號約每 10 分鐘由 GitHub 排程更新 · 現價${livePricesAt ? "來自 Binance 合約即時價" : "為掃描時價格"}`
+    (STATIC ? ` · 訊號約每 10 分鐘由 GitHub 排程更新 · ${market === "crypto" && livePricesAt ? "現價來自 Binance 合約即時價" : "現價為掃描時的派網價格"}`
       : " · 每 30 秒更新頁面");
 }
 
@@ -206,10 +234,10 @@ function renderDetailHead() {
   const s = current;
   const price = s.live;
   const i = s.info || {};
-  const st = (state.stats[s.strategy] || {})[s.interval];
+  const st = statsFor(s.strategy, mk(s), s.interval);
   const a = st && st.all;
   $("detail-head").innerHTML = `<div class="dh">
-    <div class="row1"><span class="pair">${pair(s.symbol)}</span><span class="chip">${s.label}</span>
+    <div class="row1"><span class="pair">${mk(s) === "crypto" ? pair(s.symbol) : nameHtml(s, true)}</span><span class="chip">${s.label}</span>
       <span class="dir ${s.side === "LONG" ? "up" : "down"}">${s.side}</span></div>
     <div class="muted">訊號時間 ${fmtTime(s.time)} · UTC+8</div>
     <div class="prices"><div><span class="muted">訊號價格</span><b class="num">${fp(s.price)}</b></div>
@@ -223,7 +251,8 @@ function renderDetailHead() {
       <span>ATR</span><span>${fp(i.atr, s.price)}</span>
       <span>EMA144 / 169</span><span>${fp(i.ema144)} / ${fp(i.ema169)}</span>
       ${a ? `<span>回測勝率</span><span>${(a.win_rate * 100).toFixed(1)}%（${a.trades} 筆）</span>
-      <span>回測期望值</span><span>${a.expectancy_r.toFixed(3)}R / 筆</span>` : ""}
+      <span>回測期望值</span><span>${a.expectancy_r.toFixed(3)}R / 筆</span>`
+        : `<span>回測</span><span>這類標的尚未回測，結果未知</span>`}
       <span>出場規則</span><span>TP1/2/3 各平 1/3；TP1 後止損移到 BE，TP2 後移到 TP1</span>
     </div></details>
     <div class="muted">現價更新 ${fmtTime(Date.now())} · 資訊每 30 秒更新</div></div>`;
@@ -417,9 +446,19 @@ $("cards").addEventListener("click", (e) => {
   const c = e.target.closest(".card");
   if (c) { location.hash = "s=" + encodeURIComponent(c.dataset.id); }
 });
+document.querySelectorAll(".mtab").forEach((b) => b.addEventListener("click", () => {
+  market = b.dataset.market;
+  try { localStorage.setItem("market", market); } catch { /* 私密模式 */ }
+  renderList();
+}));
 document.querySelectorAll(".tab").forEach((b) => b.addEventListener("click", () => {
   tab = b.dataset.tab;
-  document.querySelectorAll(".tab").forEach((x) => x.classList.toggle("active", x === b));
+  document.querySelectorAll(".mtab").forEach((b) => b.addEventListener("click", () => {
+  market = b.dataset.market;
+  try { localStorage.setItem("market", market); } catch { /* 私密模式 */ }
+  renderList();
+}));
+document.querySelectorAll(".tab").forEach((x) => x.classList.toggle("active", x === b));
   renderList();
 }));
 $("back").addEventListener("click", closeDetail);

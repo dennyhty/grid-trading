@@ -18,6 +18,7 @@ import sys
 from pathlib import Path
 
 from grid_trading import signals
+from grid_trading.markets import COMMODITY, CRYPTO, STOCK
 from grid_trading.signals.engine import Engine
 from signal_backtest import liquid_symbols
 from signal_server import _sanitize
@@ -37,7 +38,9 @@ def main() -> int:
     p.add_argument("--previous", help="上一次的 notifications.json，用來接續通知紀錄")
     p.add_argument("--strategies", nargs="+", default=["vegas_trend"], choices=sorted(signals.REGISTRY))
     p.add_argument("--intervals", nargs="+", default=["4H"])
-    p.add_argument("--min-volume", type=float, default=5e6)
+    p.add_argument("--min-volume", type=float, default=5e6, help="加密貨幣 24h 成交額下限 (USDT)")
+    p.add_argument("--min-volume-rwa", type=float, default=3e5, help="美股/商品 24h 成交額下限 (USDT)")
+    p.add_argument("--markets", nargs="+", default=[CRYPTO, STOCK, COMMODITY], choices=[CRYPTO, STOCK, COMMODITY])
     p.add_argument("--keep-days", type=float, default=7)
     args = p.parse_args()
 
@@ -51,8 +54,8 @@ def main() -> int:
     if args.previous and Path(args.previous).exists():
         shutil.copy(args.previous, data / "notifications.json")
 
-    engine = Engine([signals.get(n) for n in args.strategies], liquid_symbols(args.min_volume), args.intervals,
-                    args.keep_days, state_dir=data)
+    symbols = liquid_symbols(args.min_volume, tuple(args.markets), args.min_volume_rwa)
+    engine = Engine([signals.get(n) for n in args.strategies], symbols, args.intervals, args.keep_days, state_dir=data)
     engine.scan_once()
     state = engine.state()
     state["static"] = True
