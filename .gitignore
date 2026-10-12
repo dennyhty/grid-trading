@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+output/
+.venv/
+# 金鑰一律不進版控（本專案也不需要金鑰）
+.env
+*.key
