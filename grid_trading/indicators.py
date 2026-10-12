@@ -73,3 +73,43 @@ def macd(close: pd.Series, fast: int = 12, slow: int = 26, signal: int = 9) -> p
     dif = ema(close, fast) - ema(close, slow)
     dea = ema(dif, signal)
     return pd.DataFrame({"macd": dif, "signal": dea, "hist": dif - dea})
+
+
+def wma(s: pd.Series, n: int) -> pd.Series:
+    w = np.arange(1, n + 1, dtype=float)
+    return s.rolling(n).apply(lambda x: np.dot(x, w) / w.sum(), raw=True)
+
+
+def hma(close: pd.Series, n: int = 55) -> pd.Series:
+    """Hull 移動平均：WMA(2*WMA(n/2) - WMA(n), sqrt(n))，反應比 EMA 快。"""
+    half, root = max(int(n / 2), 1), max(int(np.sqrt(n)), 1)
+    return wma(2 * wma(close, half) - wma(close, n), root)
+
+
+def psar(df: pd.DataFrame, start: float = 0.02, step: float = 0.02, maximum: float = 0.2) -> pd.Series:
+    """拋物線轉向指標（Parabolic SAR），和 TradingView 預設參數相同。點在價格下方代表多頭。"""
+    high, low = df["high"].to_numpy(), df["low"].to_numpy()
+    n = len(df)
+    out = np.full(n, np.nan)
+    if n < 2:
+        return pd.Series(out, index=df.index)
+    up = high[1] >= high[0]
+    sar = low[0] if up else high[0]
+    ep = high[0] if up else low[0]
+    af = start
+    for i in range(1, n):
+        sar = sar + af * (ep - sar)
+        if up:
+            sar = min(sar, low[i - 1], low[i - 2] if i >= 2 else low[i - 1])
+            if low[i] < sar:
+                up, sar, ep, af = False, ep, low[i], start
+            elif high[i] > ep:
+                ep, af = high[i], min(af + step, maximum)
+        else:
+            sar = max(sar, high[i - 1], high[i - 2] if i >= 2 else high[i - 1])
+            if high[i] > sar:
+                up, sar, ep, af = True, ep, high[i], start
+            elif low[i] < ep:
+                ep, af = low[i], min(af + step, maximum)
+        out[i] = sar
+    return pd.Series(out, index=df.index)

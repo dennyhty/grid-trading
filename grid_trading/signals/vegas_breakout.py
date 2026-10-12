@@ -12,6 +12,10 @@
   "rsi"、"macd" 只看其中一個，"any" 兩個任一出現就略過。
 - oil：參考油價（派網 WTI 永續合約，追蹤 NYMEX 輕原油）。"with" 只在油價 4H 趨勢和交易方向相同時進場，
   "against" 相反。油價趨勢 = 4H 收盤在 EMA50 之上（多）或之下（空）。WTI 合約 2026-03 才上市，之前沒有資料就不進場。
+- ribbon：4H 方向改用完整的維加斯均線組（EMA12/144/169/288/338/576/676），收盤和 EMA12 要在全部均線之外。
+- slow_ma：1H 收盤要在 N 期簡單均線（慢趨勢線，例如 200MA）同一側。
+- hma：1H 收盤要在 N 期 Hull 均線（快趨勢線）同一側，而且 HMA 往交易方向走。
+- psar：1H 拋物線轉向指標（0.02/0.02/0.2）要在價格下方（多）或上方（空）。
 
 用 1H K 線跑，4H 指標由 1H 合成，只用已收盤的 4H K 線。
 """
@@ -38,7 +42,8 @@ class VegasBreakout(Strategy):
                  rsi_long: tuple[float, float] = (60, 80), rsi_short: tuple[float, float] = (20, 40),
                  pivot_k: int = 3, stop_buffer: float = 0.003, min_risk: float = 0.03, max_risk: float = 0.12,
                  tp_r: tuple[float, float, float] = (1.0, 2.0, 3.0), divergence: str = "none",
-                 oil: str = "none", oil_symbol: str = "WTI_USDT_PERP"):
+                 oil: str = "none", oil_symbol: str = "WTI_USDT_PERP", ribbon: bool = False,
+                 slow_ma: int = 0, hma: int = 0, psar: bool = False):
         # trend="vegas"：照 vegas_trend 的定義（收盤、EMA12 都在通道外，且通道方向一致）
         # trend="basic"：只看 4H 收盤在通道上方/下方（群組訊號回推時用的寬鬆版）
         self.trend = trend
@@ -54,6 +59,10 @@ class VegasBreakout(Strategy):
         self.divergence = divergence
         self.oil = oil
         self.oil_symbol = oil_symbol
+        self.ribbon = ribbon
+        self.slow_ma = slow_ma
+        self.hma = hma
+        self.psar = psar
 
     def prepare(self, df: pd.DataFrame) -> pd.DataFrame:
         df = df.copy()
@@ -77,6 +86,13 @@ class VegasBreakout(Strategy):
             df[f"{name}_price"] = src.where(mask).ffill().shift(k)
             df[f"{name}_rsi"] = rsi_.where(mask).ffill().shift(k)
             df[f"{name}_macd"] = macd_line.where(mask).ffill().shift(k)
+        if self.slow_ma:
+            df["slow_ma"] = c.rolling(self.slow_ma).mean()
+        if self.hma:
+            df["hma"] = ind.hma(c, self.hma)
+            df["hma_prev"] = df["hma"].shift(1)
+        if self.psar:
+            df["psar"] = ind.psar(df)
         df["low24"] = low.rolling(24).min()
         df["high24"] = high.rolling(24).max()
 
@@ -85,7 +101,12 @@ class VegasBreakout(Strategy):
         e12, e144, e169 = ind.ema(hc, 12), ind.ema(hc, 144), ind.ema(hc, 169)
         top, bottom = pd.concat([e144, e169], axis=1).max(axis=1), pd.concat([e144, e169], axis=1).min(axis=1)
         hist = ind.macd(hc)["hist"]
-        if self.trend == "vegas":
+        if self.ribbon:
+            band = pd.concat([ind.ema(hc, n) for n in (144, 169, 288, 338, 576, 676)], axis=1)
+            hi, lo = band.max(axis=1), band.min(axis=1)
+            up = (hc > hi) & (e12 > hi)
+            down = (hc < lo) & (e12 < lo)
+        elif self.trend == "vegas":
             up = (hc > top) & (e12 > top) & (e144 > e169)
             down = (hc < bottom) & (e12 < bottom) & (e144 < e169)
         else:
@@ -134,6 +155,16 @@ class VegasBreakout(Strategy):
             macd_div = new_extreme and r.macd_line > r.pl_macd
         return {"rsi": rsi_div, "macd": macd_div, "any": rsi_div or macd_div}[self.divergence]
 
+    def _lines_ok(self, r: pd.Series, side: str) -> bool:
+        d = 1 if side == LONG else -1
+        if self.slow_ma and not d * (r.close - r.slow_ma) > 0:
+            return False
+        if self.hma and not (d * (r.close - r.hma) > 0 and d * (r.hma - r.hma_prev) > 0):
+            return False
+        if self.psar and not d * (r.close - r.psar) > 0:
+            return False
+        return True
+
     def _oil_ok(self, r: pd.Series, side: str) -> bool:
         if self.oil == "none":
             return True
@@ -153,7 +184,7 @@ class VegasBreakout(Strategy):
                            "close": float(r.close), "time": int(r.time.timestamp() * 1000)}}
         emas = [r[f"ema{n}"] for n in (20, 50, 144, 169)]
         if (long_ok and all(close > e for e in emas) and self.rsi_long[0] <= r.rsi <= self.rsi_long[1]
-                and not self._diverges(r, LONG) and self._oil_ok(r, LONG)):
+                and not self._diverges(r, LONG) and self._oil_ok(r, LONG) and self._lines_ok(r, LONG)):
             base = r.swing_low if r.swing_low < close else r.low24
             stop = base * (1 - self.stop_buffer)
             risk = close - stop
@@ -161,7 +192,7 @@ class VegasBreakout(Strategy):
                 info["reason"] = "4H 維加斯通道向上、MACD 柱放大；1H 突破前 20 根高點；停損在 1H 波段低點下方"
                 return LONG, stop, [close + k * risk for k in self.tp_r], info
         if (short_ok and all(close < e for e in emas) and self.rsi_short[0] <= r.rsi <= self.rsi_short[1]
-                and not self._diverges(r, SHORT) and self._oil_ok(r, SHORT)):
+                and not self._diverges(r, SHORT) and self._oil_ok(r, SHORT) and self._lines_ok(r, SHORT)):
             base = r.swing_high if r.swing_high > close else r.high24
             stop = base * (1 + self.stop_buffer)
             risk = stop - close

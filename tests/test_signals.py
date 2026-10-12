@@ -113,3 +113,14 @@ def test_vegas_breakout_does_not_peek_ahead():
     full = [s.time for s in strat.scan(df, "X", "60M")]
     cut = [s.time for s in strat.scan(df.iloc[:900], "X", "60M")]
     assert [t for t in full if t <= df["time"].iloc[899]] == cut
+
+
+def test_psar_flips_below_price_in_an_uptrend():
+    df = _trend_hours(n=300, drift=0.003)
+    sar = ind.psar(df)
+    assert (sar.iloc[-50:] < df["close"].iloc[-50:]).all()
+
+
+def test_hma_tracks_a_straight_line():
+    s = pd.Series(np.arange(200, dtype=float))
+    assert ind.hma(s, 55).iloc[-1] == pytest.approx(199, abs=1e-6)
