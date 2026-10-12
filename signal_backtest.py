@@ -36,7 +36,10 @@ def simulate(df: pd.DataFrame, cfg: BreakoutConfig, cost: float, max_hold: int =
     """cost 是單邊手續費加滑價，結果以 R（停損距離）和 1 倍槓桿報酬率表示。"""
     trades = []
     # 先用向量化粗篩，只在候選 K 線上跑完整判斷
-    cand = (df["close"] > df["prior_high"]) & (df["rsi"].between(cfg.rsi_min, cfg.rsi_max))
+    if cfg.trigger == "pullback":
+        cand = df["h4_trend"] & (df["prev_rsi"] < cfg.pullback_rsi) & (df["rsi"] >= cfg.pullback_rsi)
+    else:
+        cand = (df["close"] > df["prior_high"]) & (df["rsi"].between(cfg.rsi_min, cfg.rsi_max))
     candidates = list(df.index[cand])
     i, n = 0, len(df)
     while i < n - 1:
