@@ -150,7 +150,7 @@ function renderStats() {
         <div class="muted">前半段 ${h1.trades || 0} 筆 期望值 ${h1.trades ? h1.expectancy_r.toFixed(3) + "R" : "—"}；後半段 ${h2.trades || 0} 筆 期望值 ${h2.trades ? h2.expectancy_r.toFixed(3) + "R" : "—"}</div>
         ${a.expectancy_r <= 0 ? `<p class="warn">期望值是負的：照這個策略在${MARKET_LABEL[market]}上交易，長期是虧錢的。</p>`
           : a.expectancy_r < 0.1 ? `<p class="warn">期望值接近 0，優勢很小、可能只是運氣。先用小資金或只觀察。</p>` : ""}
-        ${a.max_concurrent ? `<p class="warn">回測期間最多同時有 ${a.max_concurrent} 筆單在持倉（很多標的會一起出訊號、一起漲跌）。上面的回撤是一筆接一筆算的，同時持倉時虧損會疊加，實際回撤會更大。建議同時最多持有 3 筆。</p>` : ""}`);
+        <p class="warn">上面的總報酬和回撤，是每個訊號都照單跟、每筆止損最多賠總資金 ${a.risk_per_trade_pct}% 算出來的${a.max_concurrent ? `；回測期間最多同時有 ${a.max_concurrent} 筆單在持倉，很多標的會一起出訊號、一起虧，所以回撤已經包含這些一起虧的單` : ""}。每筆賠得越多，回撤就成倍放大，建議每筆止損不超過總資金的 ${a.risk_per_trade_pct}%。</p>`);
     }
   }
   $("stats").innerHTML = parts.join("") ||

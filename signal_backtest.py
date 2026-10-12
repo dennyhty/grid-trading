@@ -18,22 +18,32 @@ from grid_trading import signals
 from grid_trading.history import fetch_history
 from grid_trading.markets import COMMODITY, CRYPTO, STOCK, classify
 from grid_trading.pionex import PionexPublic
+from grid_trading.universe import TOP100, perp_symbols
 from grid_trading.signals.evaluate import split_summary, trades_for
 
 STATS_PATH = Path("stats/signal_stats.json")
 
 
 def liquid_symbols(min_volume: float, markets: tuple[str, ...] = (CRYPTO,),
-                   min_volume_rwa: float | None = None) -> list[str]:
-    """24h 成交額夠高的永續合約。markets 選類別；美股/商品可用 min_volume_rwa 另設門檻（成交量普遍比幣小）。"""
+                   min_volume_rwa: float | None = None, crypto_list: str = "top100") -> list[str]:
+    """要掃描的永續合約。markets 選類別。
+    加密貨幣：crypto_list="top100" 用 CoinMarketCap 市值前 100 名（派網有合約的），"volume" 用 24h 成交額 >= min_volume。
+    美股/商品：24h 成交額 >= min_volume_rwa（成交量普遍比幣小）。"""
     api = PionexPublic()
     tickers = api.perp_tickers()
     amount = dict(zip(tickers["symbol"], tickers["amount"]))
+    top = set(perp_symbols(TOP100))
     out = []
     for s in api.perp_symbols():
         m = classify(s)
+        if m not in markets:
+            continue
+        if m == CRYPTO and crypto_list == "top100":
+            if s in top:
+                out.append(s)
+            continue
         floor = min_volume if m == CRYPTO or min_volume_rwa is None else min_volume_rwa
-        if m in markets and amount.get(s, 0) >= floor:
+        if amount.get(s, 0) >= floor:
             out.append(s)
     return sorted(out)
 
@@ -44,19 +54,22 @@ def main() -> int:
     p.add_argument("--intervals", nargs="+", default=["60M", "4H"])
     p.add_argument("--days", type=int, default=420, help="60M 最多約 420 天；4H 可到 1300 天以上")
     p.add_argument("--days-4h", type=int, default=1300)
+    p.add_argument("--crypto-list", choices=["top100", "volume"], default="top100",
+                   help="加密貨幣用市值前 100 名，或用 --min-volume 成交額門檻")
     p.add_argument("--min-volume", type=float, default=5e6)
     p.add_argument("--market", choices=[CRYPTO, STOCK, COMMODITY], default=CRYPTO,
                    help="回測哪一類標的；美股/商品的結果存成 stats 裡的「類別|週期」")
     p.add_argument("--min-volume-rwa", type=float, default=3e5)
     p.add_argument("--symbols", nargs="*")
     p.add_argument("--fee", type=float, default=0.0005)
-    p.add_argument("--risk", type=float, default=0.01, help="每張單虧損上限佔總資金比例（1R），預設 1%%")
+    p.add_argument("--risk", type=float, default=0.0025,
+                   help="每張單虧損上限佔總資金比例（1R），預設 0.25%%（1%% 時回撤超過 -70%%）")
     p.add_argument("--param", action="append", default=[], help="策略參數，例如 --param sl_atr=2")
     args = p.parse_args()
 
     params = {k: json.loads(v) for k, v in (x.split("=", 1) for x in args.param)}
     strat = signals.get(args.strategy, **params)
-    symbols = args.symbols or liquid_symbols(args.min_volume, (args.market,), args.min_volume_rwa)
+    symbols = args.symbols or liquid_symbols(args.min_volume, (args.market,), args.min_volume_rwa, args.crypto_list)
 
     stats = json.loads(STATS_PATH.read_text()) if STATS_PATH.exists() else {}
     for interval in args.intervals:
@@ -81,7 +94,7 @@ def main() -> int:
         a = summary["all"]
         if a.get("trades"):
             print(f"{interval}: {a['trades']} 筆，勝率 {a['win_rate']:.1%}，期望值 {a['expectancy_r']:+.3f}R，"
-                  f"獲利因子 {a['profit_factor']:.2f}，每筆風險 {args.risk:.0%} 時總報酬 {a['total_return_pct']:+.1f}%，"
+                  f"獲利因子 {a['profit_factor']:.2f}，每筆風險 {args.risk:.2%} 時總報酬 {a['total_return_pct']:+.1f}%，"
                   f"最大回撤 {a['max_drawdown_pct']:.1f}%")
             for half in ("first_half", "second_half"):
                 h = summary[half]

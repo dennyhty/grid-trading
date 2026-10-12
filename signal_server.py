@@ -80,7 +80,9 @@ def main() -> int:
     p.add_argument("--strategies", nargs="+", default=["vegas_trend"], choices=sorted(signals.REGISTRY))
     p.add_argument("--intervals", nargs="+", default=["4H"],
                    help="預設只看 4H；60M（1H）回測是負期望值，要看可加上")
-    p.add_argument("--symbols", nargs="*", help="預設：24h 成交額 >= --min-volume 的永續合約")
+    p.add_argument("--symbols", nargs="*", help="預設：市值前 100 名的幣，加上成交額夠的美股/商品")
+    p.add_argument("--crypto-list", choices=["top100", "volume"], default="top100",
+                   help="加密貨幣：市值前 100 名（預設），或 24h 成交額 >= --min-volume")
     p.add_argument("--min-volume", type=float, default=5e6, help="加密貨幣 24h 成交額下限 (USDT)")
     p.add_argument("--min-volume-rwa", type=float, default=3e5, help="美股/商品 24h 成交額下限 (USDT)")
     p.add_argument("--markets", nargs="+", default=[CRYPTO, STOCK, COMMODITY], choices=[CRYPTO, STOCK, COMMODITY])
@@ -92,7 +94,7 @@ def main() -> int:
         symbols = args.symbols
     else:
         from signal_backtest import liquid_symbols
-        symbols = liquid_symbols(args.min_volume, tuple(args.markets), args.min_volume_rwa)
+        symbols = liquid_symbols(args.min_volume, tuple(args.markets), args.min_volume_rwa, args.crypto_list)
     engine = Engine([signals.get(n) for n in args.strategies], symbols, args.intervals, args.keep_days)
     print(f"監看 {len(symbols)} 個幣、週期 {args.intervals}，第一次掃描中…", file=sys.stderr)
     engine.scan_once()
