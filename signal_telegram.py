@@ -52,9 +52,6 @@ def build_outbox(data_dir: Path, previous_path: Path) -> list[str]:
         if n["kind"] == "NEW" and s:
             tps = " / ".join(f"TP{i} {_fmt(p)}" for i, p in enumerate(s["tps"], 1))
             text += f"\n止損 {_fmt(s['sl'])}\n{tps}"
-            strict = (s.get("info") or {}).get("strict_rsi")
-            if strict is not None:
-                text += "\nRSI 收緊觀察組：" + ("也會進場" if strict else "會剔除（只有現行 RSI 範圍才進）")
         out.append(text)
     return out
 

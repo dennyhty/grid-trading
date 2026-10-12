@@ -23,7 +23,7 @@ from grid_trading.history import fetch_history
 from grid_trading.markets import COMMODITY, CRYPTO, STOCK, classify
 from grid_trading.pionex import PionexPublic
 from grid_trading.universe import TOP100, perp_symbols
-from grid_trading.signals.evaluate import group_summary, split_summary, trades_for
+from grid_trading.signals.evaluate import split_summary, trades_for
 
 STATS_PATH = Path("stats/signal_stats.json")
 BINANCE_INTERVALS = {"60M": "1h", "4H": "4h"}
@@ -102,9 +102,6 @@ def main() -> int:
             print(f"  {interval} {sym}: {len(df)} 根，{len(t)} 筆交易", file=sys.stderr)
         trades = pd.DataFrame(rows)
         summary = split_summary(trades, args.risk)
-        groups = group_summary(trades)
-        if groups:
-            summary["rsi_groups"] = groups
         summary.update({"market": args.market, "source": args.source, "strategy": strat.name, "title": strat.title, "interval": interval, "params": params,
                         "fee": args.fee, "generated": datetime.now(timezone.utc).isoformat(timespec="seconds")})
         stats.setdefault(strat.name, {})[stats_key(args.market, interval, args.source)] = summary
