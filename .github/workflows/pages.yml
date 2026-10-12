@@ -1,5 +1,6 @@
-# 每 10 分鐘掃描一次訊號，把網頁和資料推到 gh-pages 分支，由 GitHub Pages 提供網址。
+# 每 10 分鐘掃描一次訊號，把網頁和資料直接發佈到 GitHub Pages。
 # 只用派網公開行情，不需要任何金鑰。
+# 需要的設定：Settings → Pages → Source 選「GitHub Actions」。
 name: 訊號網頁
 
 on:
@@ -11,14 +12,14 @@ on:
     paths: ["web/**", "grid_trading/**", "signal_*.py", "stats/**", ".github/workflows/pages.yml"]
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: pages
   cancel-in-progress: false
 
 jobs:
-  publish:
+  build:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -28,17 +29,26 @@ jobs:
           python-version: "3.12"
           cache: pip
       - run: pip install -r requirements.txt
-      - name: 取得上一次的通知紀錄
+      - name: 取得上一次的通知紀錄（從目前的網站）
         run: |
-          git fetch --depth=1 origin gh-pages && git show origin/gh-pages:data/notifications.json > previous_notifications.json || echo "[]" > previous_notifications.json
+          owner="${GITHUB_REPOSITORY%/*}"; repo="${GITHUB_REPOSITORY#*/}"
+          curl -fsS "https://${owner}.github.io/${repo}/data/notifications.json" -o previous_notifications.json \
+            || echo "[]" > previous_notifications.json
       - name: 掃描訊號、產生網站
         run: python signal_snapshot.py --out site --previous previous_notifications.json
-      - name: 推到 gh-pages
-        run: |
-          cd site
-          git init -q -b gh-pages
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A
-          git commit -q -m "訊號快照 $(date -u +%Y-%m-%dT%H:%MZ)"
-          git push -q -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" gh-pages
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
