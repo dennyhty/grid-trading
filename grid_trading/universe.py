@@ -24,6 +24,20 @@ TOP100 = [
 ]
 
 
+# 派網的 RWA 永續合約（2026-10-12 整理）：貴金屬、原油等商品，以及美股/ETF 代幣（代號後面加 X）。
+# 商品全部列入；股票/ETF 只列 24 小時成交額約 30 萬 USDT 以上的。
+RWA_COMMODITIES = ["WTI", "XAU", "XAG", "XPT", "XPD", "COPPER", "USOX"]
+RWA_STOCKS = [
+    "AAOIX", "AAPLX", "ALABX", "AMATX", "AMDX", "AMZNX", "ARMX", "ASMLX", "ASTSX", "AVGOX",
+    "AXTIX", "BEX", "BMNRX", "COHRX", "COINX", "CRCLX", "CRDOX", "CRWVX", "DELLX", "DRAMX",
+    "EWYX", "GLWX", "GOOGLX", "HIMSX", "HOODX", "INTCX", "IRENX", "KORUX", "LITEX", "LLYX",
+    "LRCXX", "METAX", "MRNAX", "MRVLX", "MSFTX", "MSTRX", "MUX", "NBISX", "NOKX", "NVDAX",
+    "ONDSX", "PLTRX", "QCOMX", "QQQX", "RKLBX", "SKHX", "SNDKX", "SNXXX", "SOXLX", "SOXSX",
+    "SPCX", "SPYX", "STXX", "TQQQX", "TSLAX", "TSMX", "URNMX", "WDCX",
+]
+RWA = RWA_COMMODITIES + RWA_STOCKS
+
+
 def fetch_cmc_top(n: int = 100) -> list[str]:
     """CoinMarketCap 市值前 n 名（不含穩定幣）的代號，依市值排序。不需要 API Key。"""
     params = {"start": 1, "limit": n + 50, "sortBy": "market_cap", "sortType": "desc", "convert": "USD"}

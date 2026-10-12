@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import os
 import time
 from pathlib import Path
 
@@ -61,7 +62,10 @@ def fetch_history(symbol: str, interval: str = "60M", days: int = 420, refresh: 
     df = df.sort_values("time").reset_index(drop=True)
     # 最後一根可能還沒收盤，不存
     df = df[df["time"] <= now_ms - INTERVAL_MS[interval]]
-    df[["time", "open", "high", "low", "close", "volume"]].to_csv(path, index=False)
+    # 先寫暫存檔再改名，多個程序同時讀寫快取時才不會讀到寫一半的檔案
+    tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp.gz")
+    df[["time", "open", "high", "low", "close", "volume"]].to_csv(tmp, index=False)
+    os.replace(tmp, path)
     return _finish(df, start_ms)
 
 
