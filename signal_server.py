@@ -15,6 +15,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 from grid_trading import signals
+from grid_trading.markets import COMMODITY, CRYPTO, STOCK
 from grid_trading.signals.engine import INTERVAL_MS, Engine
 
 WEB = Path(__file__).parent / "web"
@@ -80,7 +81,9 @@ def main() -> int:
     p.add_argument("--intervals", nargs="+", default=["4H"],
                    help="預設只看 4H；60M（1H）回測是負期望值，要看可加上")
     p.add_argument("--symbols", nargs="*", help="預設：24h 成交額 >= --min-volume 的永續合約")
-    p.add_argument("--min-volume", type=float, default=5e6)
+    p.add_argument("--min-volume", type=float, default=5e6, help="加密貨幣 24h 成交額下限 (USDT)")
+    p.add_argument("--min-volume-rwa", type=float, default=3e5, help="美股/商品 24h 成交額下限 (USDT)")
+    p.add_argument("--markets", nargs="+", default=[CRYPTO, STOCK, COMMODITY], choices=[CRYPTO, STOCK, COMMODITY])
     p.add_argument("--keep-days", type=float, default=7, help="顯示最近幾天的訊號")
     p.add_argument("--every", type=float, default=120, help="每幾秒重新掃描一次")
     args = p.parse_args()
@@ -89,7 +92,7 @@ def main() -> int:
         symbols = args.symbols
     else:
         from signal_backtest import liquid_symbols
-        symbols = liquid_symbols(args.min_volume)
+        symbols = liquid_symbols(args.min_volume, tuple(args.markets), args.min_volume_rwa)
     engine = Engine([signals.get(n) for n in args.strategies], symbols, args.intervals, args.keep_days)
     print(f"監看 {len(symbols)} 個幣、週期 {args.intervals}，第一次掃描中…", file=sys.stderr)
     engine.scan_once()

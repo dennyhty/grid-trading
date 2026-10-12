@@ -1,11 +1,11 @@
-# 每 10 分鐘掃描一次訊號，把網頁和資料直接發佈到 GitHub Pages。
+# 每 5 分鐘掃描一次訊號，把網頁和資料直接發佈到 GitHub Pages。
 # 只用派網公開行情，不需要任何金鑰。
 # 需要的設定：Settings → Pages → Source 選「GitHub Actions」。
 name: 訊號網頁
 
 on:
   schedule:
-    - cron: "*/10 * * * *"   # GitHub 排程常會延遲幾分鐘
+    - cron: "*/5 * * * *"   # 每 5 分鐘（GitHub 最短就是 5 分鐘），排程常會延遲幾分鐘
   workflow_dispatch:
   push:
     branches: [main, claude/project-thread-t012rc]

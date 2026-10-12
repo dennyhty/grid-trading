@@ -10,6 +10,7 @@ from pathlib import Path
 import pandas as pd
 
 from .. import indicators as ind
+from ..markets import LABELS as MARKET_LABELS, classify, display_name
 from ..pionex import PionexPublic
 from .strategy import Strategy
 from .tracker import track
@@ -128,7 +129,8 @@ class Engine:
                         else:
                             busy_until = now + bar
                         sid = f"{sym}|{interval}|{strat.name}|{int(sig.time.timestamp())}"
-                        found[sid] = {"id": sid, "label": label(interval), **sig.to_dict(),
+                        found[sid] = {"id": sid, "label": label(interval), "market": classify(sym),
+                                      "name": display_name(sym), **sig.to_dict(),
                                       "track": res.to_dict()}
         with self.lock:
             self._notify(found)
@@ -139,7 +141,7 @@ class Engine:
         first_run = not self.signals and not self.notifications
         for sid, s in found.items():
             old = self.signals.get(sid)
-            pair = s["symbol"].replace("_USDT_PERP", "/USDT")
+            pair = s["name"] if s["market"] != "crypto" else s["symbol"].replace("_USDT_PERP", "/USDT")
             side = "做多" if s["side"] == "LONG" else "做空"
             if old is None and not any(n["signal_id"] == sid and n["kind"] == "NEW" for n in self.notifications):
                 self._push(sid, "NEW", s["time"], f"{pair} {s['label']} {side}訊號 @ {s['price']:.6g}", first_run)
@@ -190,4 +192,6 @@ class Engine:
         strategies = {n: {"title": s.title, "description": s.description} for n, s in self.strategies.items()}
         return {"signals": sigs, "notifications": notes, "stats": stats, "strategies": strategies,
                 "updated": self.updated, "intervals": [label(i) for i in self.intervals],
-                "symbols": len(self.symbols), "fee": self.fee}
+                "symbols": len(self.symbols), "fee": self.fee,
+                "markets": {m: {"label": lbl, "symbols": sum(classify(s) == m for s in self.symbols)}
+                            for m, lbl in MARKET_LABELS.items()}}

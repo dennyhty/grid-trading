@@ -57,7 +57,19 @@ def summarize(trades: pd.DataFrame, risk_per_trade: float = 0.01) -> dict:
         "long_trades": int((trades["side"] == "LONG").sum()),
         "short_trades": int((trades["side"] == "SHORT").sum()),
         "avg_bars": float(np.mean(trades["bars"])),
+        "max_concurrent": max_concurrent(trades),
     }
+
+
+def max_concurrent(trades: pd.DataFrame) -> int:
+    """回測期間最多同時有幾筆單持倉（不同幣常常一起出訊號）。"""
+    events = sorted([(t, 1) for t in trades["time"]] + [(t, -1) for t in trades["exit_time"]],
+                    key=lambda x: (x[0], x[1]))
+    cur = best = 0
+    for _, d in events:
+        cur += d
+        best = max(best, cur)
+    return int(best)
 
 
 def split_summary(trades: pd.DataFrame, risk_per_trade: float = 0.01) -> dict:
