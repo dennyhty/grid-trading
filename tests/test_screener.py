@@ -67,3 +67,10 @@ def test_too_few_bars_skipped():
 def test_ranging_coin_ranks_above_trending():
     table = rank({"CHOP": analyze(make_df(ranging())), "TREND": analyze(make_df(uptrend()))})
     assert list(table.index) == ["CHOP", "TREND"]
+
+
+def test_very_wide_range_penalized():
+    r = analyze(make_df(ranging()))
+    wide = dict(r, range_width_pct=200.0)
+    table = rank({"NORMAL": r, "WIDE": wide})
+    assert table.loc["WIDE", "score"] < table.loc["NORMAL", "score"]

@@ -21,6 +21,8 @@ from . import indicators as ind
 
 # 派網合約網格每次成交的手續費約 0.05%，一格買賣要付兩次；格距低於這個值等於白做。
 MIN_GRID_SPACING_PCT = 0.3
+# 區間寬度超過這個值的幣不適合網格（例如 20 天內翻倍過的幣）
+MAX_RANGE_WIDTH_PCT = 50.0
 
 
 @dataclass
@@ -115,6 +117,8 @@ def score(rows: pd.DataFrame) -> pd.Series:
     s = 30 * chop + 25 * no_trend + 20 * cross + 15 * vol + 10 * liq
     # 價格已經跑出區間 → 可能正在突破，先降分
     s = s.where(rows["in_range"], s * 0.6)
+    # 區間太寬（通常是期間內暴漲暴跌過）→ 格距被迫拉大、資金效率差，也降分
+    s = s.where(rows["range_width_pct"] <= MAX_RANGE_WIDTH_PCT, s * 0.6)
     return s.round(1)
 
 

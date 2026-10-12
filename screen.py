@@ -22,6 +22,7 @@ COLUMNS = {
     "price": "現價",
     "lower": "下限",
     "upper": "上限",
+    "range_width_pct": "區間寬%",
     "grids": "格數",
     "grid_spacing_pct": "格距%",
     "stop_low": "下方停損",

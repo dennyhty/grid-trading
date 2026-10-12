@@ -41,7 +41,7 @@ class PionexPublic:
             name = s.get("symbol", "")
             if s.get("quoteCurrency", "USDT") != "USDT" or not name.endswith("_USDT_PERP"):
                 continue
-            if s.get("enable") is False:
+            if s.get("status", "TRADING") != "TRADING" or s.get("enable") is False:
                 continue
             out.append(name)
         return out
