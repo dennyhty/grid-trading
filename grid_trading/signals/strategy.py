@@ -44,6 +44,11 @@ class Strategy:
     # 圖表上要畫的均線，例如 {"EMA12": 12, "EMA144": 144}
     chart_emas: dict[str, int] = {}
     min_bars = 200
+    # 觀察組之類的標籤，會加在網站卡片和推播文字前面；空字串就不加
+    tag = ""
+    # 只在這些週期 / 類別上跑（engine 的週期寫法，例如 "4H"；類別 crypto/stock/commodity），None 表示全部
+    intervals: tuple[str, ...] | None = None
+    markets: tuple[str, ...] | None = None
 
     def prepare(self, df: pd.DataFrame) -> pd.DataFrame:
         """一次算好整段指標（只能用 ewm/rolling 這類不看未來的算法），回傳加了欄位的 df。"""

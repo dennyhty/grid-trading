@@ -52,3 +52,20 @@ def test_setups_have_stop_on_the_right_side():
     for entry in ("market", "fvg", "fvg_ce", "ob"):
         for s in smc.find_setups(df, breaks, None, setup="choch", entry=entry, htf=False, discount=False):
             assert s.direction * (s.entry - s.sl) > 0
+
+
+def test_smc_sweep_strategy_signals_are_stable_and_ordered():
+    from grid_trading import signals
+
+    df = _random_walk(1500)
+    strat = signals.get("smc_sweep")
+    full = strat.scan(df, "X_USDT_PERP", "4H")
+    cut = strat.scan(df.iloc[:1200], "X_USDT_PERP", "4H")
+    assert cut, "隨機漫步上應該會有幾個訊號"
+    # 只看前 1200 根時找到的訊號，在完整資料上也要一模一樣（不偷看未來）
+    early = [(s.time, s.side, round(s.sl, 9)) for s in full if s.time <= cut[-1].time]
+    assert early == [(s.time, s.side, round(s.sl, 9)) for s in cut]
+    for s in full:
+        assert s.direction * (s.price - s.sl) > 0
+        assert s.direction * (s.tps[0] - s.price) > 0
+    assert strat.intervals == ("4H",) and strat.markets == ("crypto",) and strat.tag

@@ -61,13 +61,7 @@ def tf_bars(h1: pd.DataFrame, hours: int) -> pd.DataFrame:
 
 
 def htf_trend_for(df: pd.DataFrame, htf: pd.DataFrame, tf_h: int, htf_h: int, k: int) -> np.ndarray:
-    """每根小週期 K 線收盤時，最後一根已收盤的大週期 K 線的結構趨勢。"""
-    trend, _ = smc.structure(htf, k)
-    htf_close = (htf["time"] + pd.Timedelta(hours=htf_h)).to_numpy()
-    ltf_close = (df["time"] + pd.Timedelta(hours=tf_h)).to_numpy()
-    idx = np.searchsorted(htf_close, ltf_close, side="right") - 1
-    out = np.where(idx >= 0, trend[np.clip(idx, 0, None)], 0)
-    return out
+    return smc.htf_trend(df, htf, tf_h, htf_h, k)
 
 
 def simulate(df: pd.DataFrame, setups: list[smc.Setup], symbol: str, tf_h: int, fee: float,

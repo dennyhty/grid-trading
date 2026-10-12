@@ -116,6 +116,15 @@ def structure(df: pd.DataFrame, k: int = 3, liq_lookback: int = 100) -> tuple[np
     return trend, breaks
 
 
+def htf_trend(df: pd.DataFrame, htf: pd.DataFrame, tf_hours: float, htf_hours: float, k: int) -> np.ndarray:
+    """每根小週期 K 線收盤時，最後一根已收盤的大週期 K 線的結構趨勢（+1/-1/0）。"""
+    trend, _ = structure(htf, k)
+    htf_close = (htf["time"] + pd.Timedelta(hours=htf_hours)).to_numpy()
+    ltf_close = (df["time"] + pd.Timedelta(hours=tf_hours)).to_numpy()
+    idx = np.searchsorted(htf_close, ltf_close, side="right") - 1
+    return np.where(idx >= 0, trend[np.clip(idx, 0, None)], 0)
+
+
 @dataclass
 class Setup:
     """在第 bar 根收盤時成立的進場計畫。entry 是限價（market 模式就是收盤價）。"""

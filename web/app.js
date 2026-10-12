@@ -134,7 +134,7 @@ async function refresh() {
 const fmtR = (x) => (x == null ? "—" : `${x >= 0 ? "+" : ""}${x.toFixed(3)}R`);
 /** 實盤紀錄：網站上出現過的每個訊號照規則跟單的結果。
  * 2026-10-12 RSI 收緊成 54～70 / 30～46 之前，紀錄裡有幾筆舊規則才會進的單（標記為 excluded），不算進來。 */
-function liveHtml(name, iv) {
+function liveHtml(name, iv, bt) {
   const ledger = state.ledger || {};
   const g = (ledger.groups || {})[`${name}|${market}|${iv}`];
   if (!g || !g.all) return "";
@@ -144,13 +144,15 @@ function liveHtml(name, iv) {
   const win = n ? (g.all.wins - ex.wins) / n : null;
   return `<div class="groups"><h3>實盤紀錄${ledger.since ? `（${fmtTime(ledger.since, false).slice(0, 10)} 起）` : ""}</h3>
     <div class="muted">網站上出現過的每個訊號照規則跟單的結果：已結束 ${n} 筆${n ? `，勝率 ${(win * 100).toFixed(0)}%，平均 ${fmtR(r)}` : ""}；持倉中 ${open} 筆。
-    回測每筆約 +0.07R，要累積幾百筆才看得出差別。</div></div>`;
+    回測每筆約 ${fmtR(bt)}，要累積幾百筆才看得出差別。</div></div>`;
 }
 
 function renderStats() {
   const parts = [];
   for (const [name, st] of Object.entries(state.strategies)) {
+    if (st.markets && !st.markets.includes(market)) continue;
     for (const iv of state.intervals.map(ivOf).filter((x) => ivFilter === "ALL" || x === ivFilter)) {
+      if (st.intervals && !st.intervals.map(ivOf).includes(iv)) continue;
       const s = statsFor(name, market, iv);
       if (!s) {
         parts.push(`<h3>${esc(st.title)} · ${lbl(iv)} · ${MARKET_LABEL[market]}</h3>
@@ -179,7 +181,8 @@ function renderStats() {
         ${a.expectancy_r <= 0 ? `<p class="warn">期望值是負的：照這個策略在${MARKET_LABEL[market]}上交易，長期是虧錢的。</p>`
           : a.expectancy_r < 0.1 ? `<p class="warn">期望值接近 0，優勢很小、可能只是運氣。先用小資金或只觀察。</p>` : ""}
         <p class="warn">上面的總報酬和回撤，是每個訊號都照單跟、每筆止損最多賠總資金 ${a.risk_per_trade_pct}% 算出來的${a.max_concurrent ? `；回測期間最多同時有 ${a.max_concurrent} 筆單在持倉，很多標的會一起出訊號、一起虧，所以回撤已經包含這些一起虧的單` : ""}。每筆賠得越多，回撤就成倍放大，建議每筆止損不超過總資金的 ${a.risk_per_trade_pct}%。</p>
-        ${liveHtml(name, iv)}`);
+        ${st.tag ? `<p class="warn">${esc(st.tag)}：先記錄實盤結果，不建議照單下。把同一天、同方向的單算成一次賭注時，2024 年後的優勢接近 0，還不能當成已驗證的策略。</p>` : ""}
+        ${liveHtml(name, iv, st.tag ? a.expectancy_r : 0.07)}`);
     }
   }
   $("stats").innerHTML = parts.join("") ||
@@ -219,6 +222,11 @@ function statusText(s) {
   return { cls: "closed", text: `已結束 · ${KIND_TEXT[last.kind] || last.kind}` };
 }
 
+function tagChip(s) {
+  const tag = (state.strategies[s.strategy] || {}).tag;
+  return tag ? `<span class="chip tag-chip">${esc(tag)}</span>` : "";
+}
+
 function cardHtml(s) {
   const price = s.live;
   const pnl = positionPnl(s, price);
@@ -228,7 +236,7 @@ function cardHtml(s) {
   return `<div class="panel card" data-id="${esc(s.id)}">
     <div class="row1"><span class="side ${s.side}">${s.side === "LONG" ? "做多" : "做空"}</span>
       <span class="pair">${nameHtml(s)}</span>
-      <span class="chip">${s.label}</span>${tested(s) ? "" : `<span class="chip warn-chip">未回測</span>`}
+      <span class="chip">${s.label}</span>${tagChip(s)}${tested(s) ? "" : `<span class="chip warn-chip">未回測</span>`}
       <span class="status ${st.cls}">${st.text}</span></div>
     <div class="meta">${esc(title)} · ${ago(s.time)} · 訊號價 ${fp(s.price)}</div>
     <div class="pnl"><div class="big num ${pnl >= 0 ? "up" : "down"}">${pct(pnl)}<small>${s.track.status === "OPEN" ? "未實現盈虧" : "已實現盈虧"}（1x）</small></div>
@@ -276,7 +284,7 @@ function renderDetailHead() {
   const st = statsFor(s.strategy, mk(s), s.interval);
   const a = st && st.all;
   $("detail-head").innerHTML = `<div class="dh">
-    <div class="row1"><span class="pair">${mk(s) === "crypto" ? pair(s.symbol) : nameHtml(s, true)}</span><span class="chip">${s.label}</span>
+    <div class="row1"><span class="pair">${mk(s) === "crypto" ? pair(s.symbol) : nameHtml(s, true)}</span><span class="chip">${s.label}</span>${tagChip(s)}
       <span class="dir ${s.side === "LONG" ? "up" : "down"}">${s.side}</span></div>
     <div class="muted">訊號時間 ${fmtTime(s.time)} · UTC+8</div>
     <div class="prices"><div><span class="muted">訊號價格</span><b class="num">${fp(s.price)}</b></div>
@@ -284,11 +292,12 @@ function renderDetailHead() {
     <details><summary>RSI 與策略資訊</summary><div class="kv num">
       <span>策略</span><span>${esc((state.strategies[s.strategy] || {}).title || s.strategy)}</span>
       <span>觸發原因</span><span>${esc(i.reason || "—")}</span>
-      <span>訊號 RSI</span><span>${i.rsi ?? "—"}</span>
+      ${i.details ? i.details.map(([k, v]) => `<span>${esc(k)}</span><span>${esc(v)}</span>`).join("") + `<span>ATR</span><span>${fp(i.atr, s.price)}</span>`
+        : `<span>訊號 RSI</span><span>${i.rsi ?? "—"}</span>
       <span>MACD DIF / DEA</span><span>${fp(i.macd, s.price)} / ${fp(i.macd_signal, s.price)}</span>
       <span>MACD 柱</span><span>${fp(i.hist, s.price)}</span>
       <span>ATR</span><span>${fp(i.atr, s.price)}</span>
-      <span>EMA144 / 169</span><span>${fp(i.ema144)} / ${fp(i.ema169)}</span>
+      <span>EMA144 / 169</span><span>${fp(i.ema144)} / ${fp(i.ema169)}</span>`}
       ${a ? `<span>回測勝率</span><span>${(a.win_rate * 100).toFixed(1)}%（${a.trades} 筆）</span>
       <span>回測期望值</span><span>${a.expectancy_r.toFixed(3)}R / 筆</span>`
         : `<span>回測</span><span>這類標的尚未回測，結果未知</span>`}

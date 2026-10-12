@@ -141,6 +141,9 @@ class Engine:
                 closed = df[df["time"] + bar <= now]
                 start = max(0, len(closed) - int(self.keep / bar) - 1)
                 for strat in self.strategies.values():
+                    if (strat.intervals and interval not in strat.intervals) or \
+                            (strat.markets and classify(sym) not in strat.markets):
+                        continue
                     busy_until = None
                     for sig in strat.scan(closed, sym, interval, start=start):
                         if busy_until is not None and sig.time < busy_until:
@@ -166,6 +169,9 @@ class Engine:
             old = self.signals.get(sid)
             pair = s["name"] if s["market"] != "crypto" else s["symbol"].replace("_USDT_PERP", "/USDT")
             side = "做多" if s["side"] == "LONG" else "做空"
+            strat = self.strategies.get(s.get("strategy", ""))
+            if strat is not None and strat.tag:
+                pair = f"［{strat.tag}］{pair}"
             quiet = first_run
             if old is None and not any(n["signal_id"] == sid and n["kind"] == "NEW" for n in self.notifications):
                 # 第一次出現時已經是 3 根 K 線以前的訊號（例如剛加上的新週期補掃到的舊訊號）：記下來但不推播
@@ -215,7 +221,10 @@ class Engine:
             notes = list(reversed(self.notifications[-100:]))
         for s in sigs:
             s["live"] = prices.get(s["symbol"])
-        strategies = {n: {"title": s.title, "description": s.description} for n, s in self.strategies.items()}
+        strategies = {n: {"title": s.title, "description": s.description, "tag": s.tag,
+                          "intervals": [label(i) for i in s.intervals] if s.intervals else None,
+                          "markets": list(s.markets) if s.markets else None}
+                      for n, s in self.strategies.items()}
         return {"signals": sigs, "notifications": notes, "stats": stats, "strategies": strategies,
                 "updated": self.updated, "intervals": [label(i) for i in self.intervals],
                 "symbols": len(self.symbols), "fee": self.fee,
