@@ -1,4 +1,6 @@
-"""多週期比較：python compare_timeframes.py --group crypto（或 rwa）[--source binance]
+"""多週期比較：python compare_timeframes.py --group crypto（或 rwa）[--source binance|pionex]
+
+加密貨幣預設用幣安的資料（時間長，從 2020-01 起），派網的資料當輔助；RWA 只有派網有。
 
 同一批幣、同一套出場規則（tracker：TP1/2/3 各平 1/3、TP1 後保本），比較週線到 1 小時線的表現。
 只讀 data/ 裡已下載的 K 線快取（先用 grid_trading.history.fetch_history 抓 60M、4H、1D）。
@@ -127,11 +129,14 @@ def summarize(t: pd.DataFrame, tiers: list[str]) -> dict:
 def main() -> int:
     p = argparse.ArgumentParser(description="多週期策略比較")
     p.add_argument("--group", choices=["crypto", "rwa"], default="crypto")
-    p.add_argument("--source", choices=["pionex", "binance"], default="pionex")
+    p.add_argument("--source", choices=["pionex", "binance"], default=None,
+                   help="K 線來源，預設加密貨幣用幣安、RWA 用派網")
     p.add_argument("--fee", type=float, default=0.0005)
     p.add_argument("--timeframes", default=",".join(TIMEFRAMES))
     p.add_argument("--out", default="output")
     args = p.parse_args()
+    if args.source is None:
+        args.source = "pionex" if args.group == "rwa" else "binance"
     if args.source == "binance" and args.group == "rwa":
         p.error("幣安沒有 RWA 合約")
     if args.group == "rwa":
