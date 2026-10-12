@@ -18,9 +18,10 @@ def test_outbox_only_new_and_not_initial(tmp_path):
         {"id": "a|TP1|3", "signal_id": "a", "kind": "TP1", "text": "到 TP1", "initial": False},
         {"id": "c|NEW|4", "signal_id": "c", "kind": "NEW", "text": "啟動時補的", "initial": True},
     ])
-    _write(data / "state.json", {"signals": [{"id": "b", "sl": 95.0, "tps": [105.0, 110.0, 115.0]}]})
+    _write(data / "state.json", {"signals": [{"id": "b", "sl": 95.0, "tps": [105.0, 110.0, 115.0],
+                                               "info": {"strict_rsi": False}}]})
     out = build_outbox(data, tmp_path / "prev.json")
-    assert out == ["BTC/USDT 4H 做多訊號 @ 100\n止損 95\nTP1 105 / TP2 110 / TP3 115", "到 TP1"]
+    assert out == ["BTC/USDT 4H 做多訊號 @ 100\n止損 95\nTP1 105 / TP2 110 / TP3 115\nRSI 收緊觀察組：會剔除（只有現行 RSI 範圍才進）", "到 TP1"]
 
 
 def test_outbox_empty_without_previous(tmp_path):

@@ -6,6 +6,7 @@
 輸出：
   <out>/data/state.json                    訊號、通知、回測數字（同 /api/state）
   <out>/data/notifications.json            通知紀錄，下一次執行接著用
+  <out>/data/ledger.json                   每個訊號的結果（實盤紀錄），下一次執行接著用
   <out>/data/chart/<symbol>_<interval>.json  圖表資料（同 /api/chart）
 """
 
@@ -19,7 +20,8 @@ from pathlib import Path
 
 from grid_trading import signals
 from grid_trading.markets import COMMODITY, CRYPTO, STOCK
-from grid_trading.signals.engine import Engine
+from grid_trading.signals import ledger as ledger_mod
+from grid_trading.signals.engine import Engine, fetch_klines
 from signal_backtest import liquid_symbols
 from signal_server import _sanitize
 
@@ -36,6 +38,7 @@ def main() -> int:
     p.add_argument("--out", default="site")
     p.add_argument("--web", default="web", help="網頁原始檔，會複製到 --out")
     p.add_argument("--previous", help="上一次的 notifications.json，用來接續通知紀錄")
+    p.add_argument("--ledger", help="上一次的 ledger.json（實盤紀錄），沒有就從頭開始")
     p.add_argument("--strategies", nargs="+", default=["vegas_trend"], choices=sorted(signals.REGISTRY))
     p.add_argument("--intervals", nargs="+", default=["4H"])
     p.add_argument("--crypto-list", choices=["top100", "volume"], default="top100",
@@ -61,6 +64,12 @@ def main() -> int:
     engine.scan_once()
     state = engine.state()
     state["static"] = True
+
+    previous = json.loads(Path(args.ledger).read_text()) if args.ledger and Path(args.ledger).exists() else []
+    book = ledger_mod.update(previous, state["signals"], lambda sym, iv: fetch_klines(engine.api, sym, iv, 1000),
+                             engine.fee)
+    write_json(data / "ledger.json", book)
+    state["ledger"] = ledger_mod.summary(book)
     write_json(data / "state.json", state)
 
     pairs = {(s["symbol"], s["interval"], s["strategy"]) for s in state["signals"]}

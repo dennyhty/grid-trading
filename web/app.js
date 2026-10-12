@@ -128,6 +128,26 @@ async function refresh() {
 }
 
 // ---------- 列表 ----------
+const fmtR = (x) => (x == null ? "—" : `${x >= 0 ? "+" : ""}${x.toFixed(3)}R`);
+/** RSI 收緊觀察組：回測（2024 後）和實盤紀錄，三組並排。 */
+function rsiGroupHtml(name, iv, s) {
+  const g = s && s.rsi_groups;
+  const ledger = state.ledger || {};
+  const live = (ledger.groups || {})[`${name}|${market}|${iv}`];
+  if (!g && !live) return "";
+  const rows = [["all", "全部"], ["strict", "收緊組會進"], ["excluded", "收緊組剔除"]];
+  const cell = (b) => (b && b.trades ? `${b.trades} 筆 ${fmtR(b.expectancy_r)}` : "0 筆");
+  const body = rows.map(([k, t]) => {
+    const bt = g ? cell(g[k].recent) : "—";
+    const lv = live && live[k] ? `${cell(live[k])}${live[k].open ? `<br><span class="muted">持倉中 ${live[k].open}</span>` : ""}` : "0 筆";
+    return `<tr><td>${t}</td><td class="num">${bt}</td><td class="num">${lv}</td></tr>`;
+  }).join("");
+  return `<div class="groups"><h3>RSI 收緊觀察組（多單 54～70、空單 30～46）</h3>
+    <div class="muted">只是標記，訊號和推播仍照現行規則（多單 50～70、空單 30～50）。每張卡片上的「收緊組 ✓／✗」表示收緊後這筆還會不會進場。</div>
+    <table><tr><th>組別</th><th>回測 ${g ? g.since.slice(0, 4) + " 後" : ""}</th><th>實盤紀錄${ledger.since ? `（${fmtTime(ledger.since, false).slice(0, 10)} 起）` : ""}</th></tr>${body}</table>
+    <div class="muted">回測裡兩組的差距約 1.2 倍標準誤，還不算證據；實盤累積幾百筆已結束的單之後再決定要不要換。</div></div>`;
+}
+
 function renderStats() {
   const parts = [];
   for (const [name, st] of Object.entries(state.strategies)) {
@@ -159,7 +179,8 @@ function renderStats() {
         ${pa.trades ? `<div class="muted">派網資料（${period(px)}，${px.symbols} 個標的）：${pa.trades} 筆，勝率 ${(pa.win_rate * 100).toFixed(1)}%，期望值 ${pa.expectancy_r >= 0 ? "+" : ""}${pa.expectancy_r.toFixed(3)}R，最大回撤 ${pa.max_drawdown_pct.toFixed(1)}%</div>` : ""}
         ${a.expectancy_r <= 0 ? `<p class="warn">期望值是負的：照這個策略在${MARKET_LABEL[market]}上交易，長期是虧錢的。</p>`
           : a.expectancy_r < 0.1 ? `<p class="warn">期望值接近 0，優勢很小、可能只是運氣。先用小資金或只觀察。</p>` : ""}
-        <p class="warn">上面的總報酬和回撤，是每個訊號都照單跟、每筆止損最多賠總資金 ${a.risk_per_trade_pct}% 算出來的${a.max_concurrent ? `；回測期間最多同時有 ${a.max_concurrent} 筆單在持倉，很多標的會一起出訊號、一起虧，所以回撤已經包含這些一起虧的單` : ""}。每筆賠得越多，回撤就成倍放大，建議每筆止損不超過總資金的 ${a.risk_per_trade_pct}%。</p>`);
+        <p class="warn">上面的總報酬和回撤，是每個訊號都照單跟、每筆止損最多賠總資金 ${a.risk_per_trade_pct}% 算出來的${a.max_concurrent ? `；回測期間最多同時有 ${a.max_concurrent} 筆單在持倉，很多標的會一起出訊號、一起虧，所以回撤已經包含這些一起虧的單` : ""}。每筆賠得越多，回撤就成倍放大，建議每筆止損不超過總資金的 ${a.risk_per_trade_pct}%。</p>
+        ${rsiGroupHtml(name, iv, s)}`);
     }
   }
   $("stats").innerHTML = parts.join("") ||
@@ -199,6 +220,12 @@ function statusText(s) {
   return { cls: "closed", text: `已結束 · ${KIND_TEXT[last.kind] || last.kind}` };
 }
 
+function strictChip(s) {
+  const v = (s.info || {}).strict_rsi;
+  if (v === undefined || v === null) return "";
+  return `<span class="chip" title="RSI 收緊觀察組（多單 54～70、空單 30～46）${v ? "也會進場" : "會剔除"}">收緊組 ${v ? "✓" : "✗"}</span>`;
+}
+
 function cardHtml(s) {
   const price = s.live;
   const pnl = positionPnl(s, price);
@@ -208,7 +235,7 @@ function cardHtml(s) {
   return `<div class="panel card" data-id="${esc(s.id)}">
     <div class="row1"><span class="side ${s.side}">${s.side === "LONG" ? "做多" : "做空"}</span>
       <span class="pair">${nameHtml(s)}</span>
-      <span class="chip">${s.label}</span>${tested(s) ? "" : `<span class="chip warn-chip">未回測</span>`}
+      <span class="chip">${s.label}</span>${tested(s) ? "" : `<span class="chip warn-chip">未回測</span>`}${strictChip(s)}
       <span class="status ${st.cls}">${st.text}</span></div>
     <div class="meta">${esc(title)} · ${ago(s.time)} · 訊號價 ${fp(s.price)}</div>
     <div class="pnl"><div class="big num ${pnl >= 0 ? "up" : "down"}">${pct(pnl)}<small>${s.track.status === "OPEN" ? "未實現盈虧" : "已實現盈虧"}（1x）</small></div>
@@ -255,7 +282,8 @@ function renderDetailHead() {
       <div><span class="muted">現價</span><b class="num ${priceMove(s, price) >= 0 ? "up" : "down"}">${fp(price, s.price)}</b></div></div>
     <details><summary>RSI 與策略資訊</summary><div class="kv num">
       <span>策略</span><span>${esc((state.strategies[s.strategy] || {}).title || s.strategy)}</span>
-      <span>觸發原因</span><span>${esc(i.reason || "—")}</span>
+      <span>觸發原因</span><span>${esc(i.reason || "—")}</span>${i.strict_rsi === undefined ? "" : `
+      <span>RSI 收緊組</span><span>${i.strict_rsi ? "也會進場" : "會剔除"}</span>`}
       <span>訊號 RSI</span><span>${i.rsi ?? "—"}</span>
       <span>MACD DIF / DEA</span><span>${fp(i.macd, s.price)} / ${fp(i.macd_signal, s.price)}</span>
       <span>MACD 柱</span><span>${fp(i.hist, s.price)}</span>
