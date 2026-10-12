@@ -26,6 +26,9 @@ def main() -> int:
     p.add_argument("--symbols", nargs="*", help="只測指定幣種")
     p.add_argument("--fee", type=float, default=0.0005, help="每次成交手續費率，預設 0.05%%")
     p.add_argument("--refresh", action="store_true", help="重新下載歷史資料")
+    p.add_argument("--suite", choices=["base", "exits"], default="exits",
+                   help="base：第一輪 24 組；exits：加入提早收網與更緊停損的改良版")
+    p.add_argument("--tag", default="", help="輸出檔名後綴")
     args = p.parse_args()
 
     if args.symbols:
@@ -43,10 +46,17 @@ def main() -> int:
             data[sym] = df
         print(f"  {sym}: {len(df)} 根 1H K 線", file=sys.stderr)
 
-    variants = [
-        Variant(direction=d, filtered=f, hold_days=h, stop_atr_mult=s)
-        for d, f, h, s in itertools.product(["vegas", "neutral"], [True, False], [3, 7, 14], [1.0, 2.0])
-    ]
+    if args.suite == "base":
+        variants = [
+            Variant(direction=d, filtered=f, hold_days=h, stop_atr_mult=s)
+            for d, f, h, s in itertools.product(["vegas", "neutral"], [True, False], [3, 7, 14], [1.0, 2.0])
+        ]
+    else:
+        # 第一輪發現：過濾一定要開、持有久一點較好，所以只在這個基礎上改出場規則
+        variants = [
+            Variant(direction=d, filtered=True, hold_days=h, stop_atr_mult=s, exit_adx=e)
+            for d, h, s, e in itertools.product(["vegas", "neutral"], [7, 14], [0.5, 1.0], [None, 30.0, 25.0])
+        ]
     cfg = ScreenConfig()
     all_rows, summary = [], []
     for v in variants:
@@ -65,14 +75,14 @@ def main() -> int:
 
     out = Path("output")
     out.mkdir(exist_ok=True)
-    pd.concat(all_rows).to_csv(out / "backtest_windows.csv", index=False, encoding="utf-8-sig")
+    pd.concat(all_rows).to_csv(out / f"backtest_windows{args.tag}.csv", index=False, encoding="utf-8-sig")
     table = pd.DataFrame(summary)
-    table.to_csv(out / "backtest_summary.csv", index=False, encoding="utf-8-sig")
+    table.to_csv(out / f"backtest_summary{args.tag}.csv", index=False, encoding="utf-8-sig")
 
     with pd.option_context("display.width", 250, "display.max_columns", None, "display.max_rows", 200,
                            "display.float_format", "{:.2f}".format):
         print(table[table["期間"] == "全部"].sort_values("組合年化%", ascending=False).to_string(index=False))
-    print(f"\n完整結果：{out / 'backtest_summary.csv'}、{out / 'backtest_windows.csv'}", file=sys.stderr)
+    print(f"\n完整結果：{out / f'backtest_summary{args.tag}.csv'}", file=sys.stderr)
     return 0
 
 

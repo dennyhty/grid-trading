@@ -14,6 +14,7 @@ import numpy as np
 import pandas as pd
 
 from .gridsim import LONG, NEUTRAL, SHORT, simulate
+from . import indicators as ind
 from .history import resample
 from .screener import MAX_RANGE_WIDTH_PCT, ScreenConfig, analyze
 
@@ -29,11 +30,13 @@ class Variant:
     stop_atr_mult: float = 1.0
     max_adx: float = 25.0
     max_efficiency: float = 0.15
+    exit_adx: float | None = None  # 開單後 4H ADX 收盤超過這個值（趨勢出現）就提早收網
 
     def label(self) -> str:
+        exit_ = f"|ADX>{self.exit_adx:g}收網" if self.exit_adx is not None else ""
         return (f"{'順勢' if self.direction == 'vegas' else '中性'}"
                 f"|{'過濾' if self.filtered else '不過濾'}"
-                f"|{self.hold_days}天|停損{self.stop_atr_mult:g}ATR")
+                f"|{self.hold_days}天|停損{self.stop_atr_mult:g}ATR{exit_}")
 
 
 def windows(h1: pd.DataFrame, variant: Variant, cfg: ScreenConfig, symbol: str, fee: float) -> list[dict]:
@@ -45,6 +48,8 @@ def windows(h1: pd.DataFrame, variant: Variant, cfg: ScreenConfig, symbol: str, 
     t = ANCHOR + step * int(np.ceil((warmup - ANCHOR) / step))
     cfg = replace(cfg, stop_atr_mult=variant.stop_atr_mult)
     h4_all = resample(h1)  # t 都對齊 4H 整點，所以 time < t 的 4H K 線都已收盤
+    # ADX 是用 ewm 算的，每個值只用到當根以前的資料；4H K 線標記在開盤時間，收盤 = time + 4h
+    h4_adx = pd.Series(ind.adx(h4_all).values, index=h4_all["time"] + pd.Timedelta(hours=4))
     out = []
     while t + step <= times.iloc[-1]:
         h4 = h4_all[h4_all["time"] < t].iloc[-500:]
@@ -74,10 +79,18 @@ def windows(h1: pd.DataFrame, variant: Variant, cfg: ScreenConfig, symbol: str, 
         if (stop_low is not None and p0 <= stop_low) or (stop_high is not None and p0 >= stop_high):
             out.append({**row, "traded": False, "ret": 0.0})
             continue
+        exited = False
+        if variant.exit_adx is not None:
+            during = h4_adx[(h4_adx.index > t_start) & (h4_adx.index < t)]
+            trigger = during[during > variant.exit_adx]
+            if not trigger.empty:
+                # 在那根 4H K 線收盤時以收盤價全部平倉
+                future = future[future["time"] < trigger.index[0]]
+                exited = True
         res = simulate(future, r["lower"], r["upper"], r["grids"], mode, stop_low, stop_high, fee)
         out.append({**row, "traded": True, "ret": res.ret, "grid_profit": res.grid_profit,
                     "fees": res.fees, "max_dd": res.max_drawdown, "trades": res.trades,
-                    "stopped": res.stopped})
+                    "stopped": res.stopped, "exited": exited and not res.stopped})
     return out
 
 
@@ -99,6 +112,7 @@ def summarize(df: pd.DataFrame, hold_days: int) -> dict:
         "勝率": (traded["ret"] > 0).mean(),
         "最差單次%": traded["ret"].min() * 100,
         "停損率": traded["stopped"].mean(),
+        "提早收網率": traded["exited"].mean() if "exited" in traded else 0.0,
         "組合總報酬%": total * 100,
         "組合年化%": ((1 + total) ** (1 / years) - 1) * 100 if years > 0 and total > -1 else np.nan,
         "組合最大回撤%": dd * 100,
