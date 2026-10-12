@@ -57,3 +57,19 @@ def mean_crossings(close: pd.Series, n: int, ma_len: int = 20) -> int:
     side = np.sign(close - ma).iloc[-n:]
     side = side[side != 0].dropna()
     return int((side.diff().abs() > 0).sum())
+
+
+def rsi(close: pd.Series, n: int = 14) -> pd.Series:
+    """Wilder RSI。"""
+    diff = close.diff()
+    gain = diff.clip(lower=0).ewm(alpha=1 / n, adjust=False).mean()
+    loss = (-diff.clip(upper=0)).ewm(alpha=1 / n, adjust=False).mean()
+    rs = gain / loss.replace(0, np.nan)
+    return (100 - 100 / (1 + rs)).fillna(100.0)
+
+
+def macd(close: pd.Series, fast: int = 12, slow: int = 26, signal: int = 9) -> pd.DataFrame:
+    """回傳 macd（DIF）、signal（DEA）、hist（柱狀體）三欄。"""
+    dif = ema(close, fast) - ema(close, slow)
+    dea = ema(dif, signal)
+    return pd.DataFrame({"macd": dif, "signal": dea, "hist": dif - dea})

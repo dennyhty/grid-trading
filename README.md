@@ -52,3 +52,66 @@ python backtest.py                # 抓約 14 個月 1H K 線（快取在 data/�
 
 每隔 3/7/14 天，只用當時以前的資料跑篩選器取得參數，再用之後的 K 線模擬網格（含手續費、停損），
 前半段當訓練期、後半段當驗證期。結果在 `output/backtest_summary.csv` 和 `output/backtest_windows.csv`。
+
+## 交易訊號網頁（第二個方向）
+
+網格回測沒有正期望值，所以另外做了一個「順勢訊號」工具：程式找出進場點，給進場價、TP1/TP2/TP3、BE、SL，
+之後自動追蹤 TP 觸及、保護止損移動和出場，也有通知中心。一樣只用公開行情、不會下單。
+
+```bash
+pip install -r requirements.txt
+python signal_server.py            # 開 http://localhost:8000
+python signal_server.py --intervals 4H 60M --keep-days 14   # 加看 1H、顯示 14 天內的訊號
+python signal_backtest.py          # 重跑回測，更新 stats/signal_stats.json（網頁上的勝率/期望值）
+```
+
+手機要看：手機和電腦連同一個 Wi-Fi，開 `http://<電腦的區網 IP>:8000`（Mac 在「系統設定 → Wi-Fi → 詳細資訊」看得到 IP）。
+瀏覽器通知在電腦上可用；iPhone 的 Safari 只有「加入主畫面」且是 HTTPS 網址時才會跳通知，區網 http 時請看頁面右上角的通知中心。
+
+### 頁面功能
+
+- 訊號列表：做多/做空、幣種、週期、觸發時間、訊號價、現價、盈虧（1 倍、含手續費）、TP3~SL 價位梯、觸及時間軸，分「進行中 / 已結束」。
+- 訊號圖表：訊號時間（UTC+8）、RSI/MACD/ATR 與觸發原因、K 線＋均線（EMA12/144/169/576/676）＋訊號箭頭＋TP/SL 線、
+  週期切換、回到訊號、最新價格即時更新（每 30 秒）、全螢幕。
+- 通知中心：新訊號、TP 觸及、保護止損移動、止損/保本出場。
+- 回測數字：每個策略、每個週期的勝率、期望值（R）、獲利因子、最大回撤，前後半段分開看。
+
+### 出場規則（所有策略共用）
+
+TP1、TP2、TP3 各平 1/3；TP1 觸及後剩餘倉位止損移到 BE（進場價＋來回手續費），TP2 觸及後移到 TP1。
+同一根 K 線同時碰到止損和 TP 時保守算先止損。1R = 進場價到 SL 的距離。
+
+### 第一個策略：維加斯通道順勢 + MACD/RSI（`vegas_trend`）
+
+價格和 EMA12 都在 EMA144/169 通道上方、且 EMA144 > EMA169 時只找多單（反之只找空單）；MACD 柱翻正（翻負）、
+RSI 在 50~70（30~50）、價格離通道不超過 3 ATR 時進場。SL = 1.5 ATR，TP = 1R/2R/3R。
+
+回測（21 個流動性高的幣，含 0.05% 手續費）：
+
+| 週期 | 期間 | 筆數 | 勝率 | 期望值 | 每筆賠 1% 的總報酬 | 最大回撤 |
+|---|---|---|---|---|---|---|
+| 4H | 2023-05 ~ 2026-10 | 753 | 51.8% | +0.041R | +29% | -27.5% |
+| 1H | 2025-09 ~ 2026-10 | 1388 | 49.5% | -0.057R | -58% | -64% |
+
+4H 前後半段都是小正數（+0.035R / +0.044R），但每筆 R 的標準差約 1.2，753 筆的誤差約 ±0.044R，
+所以**還不能確定有真正的優勢**；而且只測了「現在」流動性高的幣（倖存者偏差）。1H 是負的，網頁預設只看 4H。
+
+### 加新策略
+
+在 `grid_trading/signals/` 新增一個檔案，繼承 `Strategy`、實作 `prepare()`（算指標）和 `check(df, i)`
+（第 i 根收盤時是否進場，回傳方向、SL、三個 TP、資訊），加上 `@register`，再到 `grid_trading/signals/__init__.py` import。
+之後 `python signal_backtest.py --strategy 新名稱` 回測、`python signal_server.py --strategies vegas_trend 新名稱` 上線。
+
+圖表使用 [TradingView Lightweight Charts](https://github.com/tradingview/lightweight-charts)（Apache 2.0，放在 `web/vendor/`）。
+
+### 放在 GitHub Pages（不用開電腦）
+
+`.github/workflows/pages.yml` 每 10 分鐘在 GitHub 上跑一次 `signal_snapshot.py`：掃描訊號、追蹤 TP/SL、產生圖表資料，
+連同網頁一起推到 `gh-pages` 分支。網址是 `https://dennyhty.github.io/grid-trading/`。
+
+- 第一次要做：這個 workflow 合併進預設分支後，到 repo 的 Settings → Pages，Source 選「Deploy from a branch」、分支選 `gh-pages`。
+- 訊號和 TP/SL 觸及最快約 10 分鐘更新一次（GitHub 排程常延遲幾分鐘）。
+- 派網的行情 API 不允許網頁直接讀，所以網頁上的「現價」改由瀏覽器向 Binance U 本位合約抓公開即時價（每 30 秒），
+  和派網價差通常很小；抓不到或差超過 5%（不是同一個商品）時，顯示掃描當下的派網價格。
+- 本機版 `python signal_server.py` 照常可用，網頁會自動判斷是哪一種模式。
+- 公開 repo 的 GitHub Actions 免費；repo 超過 60 天沒有任何 commit，GitHub 會暫停排程，到 Actions 頁面重新啟用即可。

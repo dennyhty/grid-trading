@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0f1115">
+<title>交易訊號</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="top">
+  <button id="back" class="ghost hidden" aria-label="返回">‹ 返回</button>
+  <div class="brand">
+    <div class="name">SIGNAL</div>
+    <div class="sub" id="subtitle">訊號列表</div>
+  </div>
+  <button id="bell" class="ghost bell" aria-label="通知中心">🔔<span id="badge" class="badge hidden">0</span></button>
+</header>
+
+<main>
+  <!-- 列表 -->
+  <section id="list-view">
+    <div id="stats" class="panel stats"></div>
+    <div class="tabs">
+      <button class="tab active" data-tab="OPEN">進行中 <span id="n-open"></span></button>
+      <button class="tab" data-tab="CLOSED">已結束 <span id="n-closed"></span></button>
+    </div>
+    <div id="cards"></div>
+    <p class="foot" id="foot"></p>
+  </section>
+
+  <!-- 單一訊號圖表 -->
+  <section id="detail-view" class="hidden">
+    <div class="panel" id="detail-head"></div>
+    <div class="panel chart-panel" id="chart-panel">
+      <div class="controls">
+        <label>週期
+          <select id="interval"></select>
+        </label>
+        <span class="muted" id="interval-note">原訊號週期</span>
+      </div>
+      <div class="buttons">
+        <button id="btn-signal">回到訊號</button>
+        <button id="btn-live">最新價格・即時</button>
+        <button id="btn-full">全螢幕</button>
+        <button id="btn-more">▶ 更多</button>
+      </div>
+      <div id="more" class="more hidden">
+        <label><input type="checkbox" id="opt-levels" checked> 顯示 TP / SL 線</label>
+        <label><input type="checkbox" id="opt-emas" checked> 顯示均線</label>
+        <div id="legend" class="legend"></div>
+      </div>
+      <div class="live-line"><span id="live-dot" class="dot"></span> <b>即時現價</b>
+        <span class="muted" id="live-hint">點「最新價格」開啟即時更新</span></div>
+      <div class="kinfo" id="kinfo"></div>
+      <div id="chart"></div>
+    </div>
+    <div class="panel" id="detail-levels"></div>
+  </section>
+</main>
+
+<!-- 通知中心 -->
+<div id="notif" class="sheet hidden">
+  <div class="sheet-head">
+    <b>通知中心</b>
+    <div>
+      <button id="notif-perm" class="small">開啟手機/瀏覽器通知</button>
+      <button id="notif-close" class="ghost">✕</button>
+    </div>
+  </div>
+  <div id="notif-list"></div>
+</div>
+
+<script src="vendor/lightweight-charts.standalone.production.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
