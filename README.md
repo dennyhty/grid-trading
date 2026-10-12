@@ -107,9 +107,9 @@ RSI 在 50~70（30~50）、價格離通道不超過 3 ATR 時進場。SL = 1.5 A
 ### 放在 GitHub Pages（不用開電腦）
 
 `.github/workflows/pages.yml` 每 10 分鐘在 GitHub 上跑一次 `signal_snapshot.py`：掃描訊號、追蹤 TP/SL、產生圖表資料，
-連同網頁一起推到 `gh-pages` 分支。網址是 `https://dennyhty.github.io/grid-trading/`。
+連同網頁一起直接發佈到 GitHub Pages。網址是 `https://dennyhty.github.io/grid-trading/`。
 
-- 第一次要做：這個 workflow 合併進預設分支後，到 repo 的 Settings → Pages，Source 選「Deploy from a branch」、分支選 `gh-pages`。
+- 第一次要做：到 repo 的 Settings → Pages，Source 選「GitHub Actions」。
 - 訊號和 TP/SL 觸及最快約 10 分鐘更新一次（GitHub 排程常延遲幾分鐘）。
 - 派網的行情 API 不允許網頁直接讀，所以網頁上的「現價」改由瀏覽器向 Binance U 本位合約抓公開即時價（每 30 秒），
   和派網價差通常很小；抓不到或差超過 5%（不是同一個商品）時，顯示掃描當下的派網價格。
