@@ -51,11 +51,16 @@ function nameHtml(s, withMarket = false) {
   if (mk(s) === "crypto") return `${pair(s.symbol).split("/")[0]}<small>/USDT</small>`;
   return `${esc(s.name || s.symbol)}${withMarket ? `<small> ${MARKET_LABEL[mk(s)]}</small>` : ""}`;
 }
-/** 回測數字：加密貨幣存在 stats[策略][週期]，美股/商品存在 stats[策略]["類別|週期"]。 */
-function statsFor(strategy, mkt, interval) {
+/** 回測數字：加密貨幣存在 stats[策略][週期]，美股/商品存在 stats[策略]["類別|週期"]，
+ *  幣安資料的再加「@binance」。沒指定 source 時以幣安為主，沒有才用派網。 */
+function statsFor(strategy, mkt, interval, source) {
   const st = state.stats[strategy] || {};
-  return st[mkt === "crypto" ? interval : `${mkt}|${interval}`];
+  const key = mkt === "crypto" ? interval : `${mkt}|${interval}`;
+  if (source) return st[source === "pionex" ? key : `${key}@${source}`];
+  return st[`${key}@binance`] || st[key];
 }
+const SOURCE_LABEL = { binance: "幣安資料", pionex: "派網資料" };
+const period = (s) => `${fmtTime(s.start, false).slice(0, 7)} ~ ${fmtTime(s.end, false).slice(0, 7)}`;
 const tested = (s) => !!(statsFor(s.strategy, mk(s), s.interval) || {}).all?.trades;
 
 // ---------- 計算 ----------
@@ -137,8 +142,11 @@ function renderStats() {
       if (!a.trades) continue;
       const h1 = s.first_half || {}, h2 = s.second_half || {};
       const ok = a.expectancy_r > 0;
-      parts.push(`<h3>${esc(st.title)} · ${lbl(iv)} · ${MARKET_LABEL[market]} 回測</h3>
-        <div class="muted">${fmtTime(s.start, false).slice(0, 10)} ~ ${fmtTime(s.end, false).slice(0, 10)}，${s.symbols} 個標的，含手續費 ${(s.fee * 100).toFixed(2)}%/次</div>
+      const src = s.source || "pionex";
+      const px = src === "binance" ? statsFor(name, market, iv, "pionex") : null;
+      const pa = (px && px.all) || {};
+      parts.push(`<h3>${esc(st.title)} · ${lbl(iv)} · ${MARKET_LABEL[market]} 回測（${SOURCE_LABEL[src]}）</h3>
+        <div class="muted">${period(s)}，${s.symbols} 個標的，含手續費 ${(s.fee * 100).toFixed(2)}%/次${src === "binance" ? "。訊號和下單都在派網，回測用幣安較長的歷史" : ""}</div>
         <div class="grid">
           <div><span class="muted">勝率</span><b>${(a.win_rate * 100).toFixed(1)}%</b></div>
           <div><span class="muted">期望值 / 筆</span><b class="${ok ? "up" : "down"}">${a.expectancy_r >= 0 ? "+" : ""}${a.expectancy_r.toFixed(3)}R</b></div>
@@ -148,6 +156,7 @@ function renderStats() {
           <div><span class="muted">最大回撤</span><b class="down">${a.max_drawdown_pct.toFixed(1)}%</b></div>
         </div>
         <div class="muted">前半段 ${h1.trades || 0} 筆 期望值 ${h1.trades ? h1.expectancy_r.toFixed(3) + "R" : "—"}；後半段 ${h2.trades || 0} 筆 期望值 ${h2.trades ? h2.expectancy_r.toFixed(3) + "R" : "—"}</div>
+        ${pa.trades ? `<div class="muted">派網資料（${period(px)}，${px.symbols} 個標的）：${pa.trades} 筆，勝率 ${(pa.win_rate * 100).toFixed(1)}%，期望值 ${pa.expectancy_r >= 0 ? "+" : ""}${pa.expectancy_r.toFixed(3)}R，最大回撤 ${pa.max_drawdown_pct.toFixed(1)}%</div>` : ""}
         ${a.expectancy_r <= 0 ? `<p class="warn">期望值是負的：照這個策略在${MARKET_LABEL[market]}上交易，長期是虧錢的。</p>`
           : a.expectancy_r < 0.1 ? `<p class="warn">期望值接近 0，優勢很小、可能只是運氣。先用小資金或只觀察。</p>` : ""}
         <p class="warn">上面的總報酬和回撤，是每個訊號都照單跟、每筆止損最多賠總資金 ${a.risk_per_trade_pct}% 算出來的${a.max_concurrent ? `；回測期間最多同時有 ${a.max_concurrent} 筆單在持倉，很多標的會一起出訊號、一起虧，所以回撤已經包含這些一起虧的單` : ""}。每筆賠得越多，回撤就成倍放大，建議每筆止損不超過總資金的 ${a.risk_per_trade_pct}%。</p>`);
