@@ -30,6 +30,7 @@ def rsi(close: pd.Series, n: int = 14) -> pd.Series:
 
 @dataclass(frozen=True)
 class BreakoutConfig:
+    trigger: str = "breakout"   # breakout：突破追多；pullback：多頭趨勢中回檔、RSI 從 40 以下翻上
     lookback: int = 20          # 突破前幾根 1H 的最高價
     rsi_min: float = 60.0
     rsi_max: float = 80.0
@@ -40,10 +41,14 @@ class BreakoutConfig:
     max_risk: float = 0.12
     tp1_r: float = 1.0
     tp2_r: float = 2.0
+    pullback_rsi: float = 40.0  # 回檔買：1H RSI 由下往上穿過這個值
+    pullback_depth: float = 0.03  # 回檔買：收盤至少低於前 20 根高點 3%
 
     def label(self) -> str:
+        if self.trigger == "pullback":
+            return f"回檔買_RSI翻上{self.pullback_rsi:.0f}_TP{self.tp1_r:g}R/{self.tp2_r:g}R"
         f = "4H濾網" if self.use_4h_filter else "無4H濾網"
-        return f"RSI{self.rsi_min:.0f}-{self.rsi_max:.0f}_{f}_TP{self.tp1_r:g}R/{self.tp2_r:g}R"
+        return f"突破_RSI{self.rsi_min:.0f}-{self.rsi_max:.0f}_{f}_TP{self.tp1_r:g}R/{self.tp2_r:g}R"
 
 
 def add_indicators(df_1h: pd.DataFrame, cfg: BreakoutConfig = BreakoutConfig()) -> pd.DataFrame:
@@ -53,12 +58,14 @@ def add_indicators(df_1h: pd.DataFrame, cfg: BreakoutConfig = BreakoutConfig()) 
     for n in (20, 50, 144, 169):
         df[f"ema{n}"] = ema(c, n)
     df["rsi"] = rsi(c)
+    df["prev_rsi"] = df["rsi"].shift(1)
     df["prior_high"] = df["high"].shift(1).rolling(cfg.lookback).max()
     k = cfg.pivot_k
     low = df["low"]
     is_pivot = low == low.rolling(2 * k + 1, center=True).min()
     # 波段低點要等右邊 k 根收完才確認，所以往後移 k 根才能用
     df["swing_low"] = low.where(is_pivot).ffill().shift(k)
+    df["low24"] = low.rolling(24).min()
 
     h4 = resample(df_1h[["time", "open", "high", "low", "close", "volume"]], "4h")
     macd = ema(h4["close"], 12) - ema(h4["close"], 26)
@@ -81,15 +88,26 @@ def signal_at(row: pd.Series, cfg: BreakoutConfig = BreakoutConfig()) -> dict | 
     if pd.isna(row["prior_high"]) or pd.isna(row["ema169"]):
         return None
     close = row["close"]
-    if close <= row["prior_high"]:
-        return None
-    if not all(close > row[f"ema{n}"] for n in (20, 50, 144, 169)):
-        return None
-    if not cfg.rsi_min <= row["rsi"] <= cfg.rsi_max:
-        return None
-    if cfg.use_4h_filter and not (row["h4_trend"] and row["h4_macd"]):
-        return None
-    stop = row["swing_low"] * (1 - cfg.stop_buffer)
+    if cfg.trigger == "pullback":
+        # 4H 仍在維加斯通道之上，1H 回檔後 RSI 翻上
+        if not row["h4_trend"]:
+            return None
+        if close > row["prior_high"] * (1 - cfg.pullback_depth):
+            return None
+        if not row["prev_rsi"] < cfg.pullback_rsi <= row["rsi"]:
+            return None
+    else:
+        if close <= row["prior_high"]:
+            return None
+        if not all(close > row[f"ema{n}"] for n in (20, 50, 144, 169)):
+            return None
+        if not cfg.rsi_min <= row["rsi"] <= cfg.rsi_max:
+            return None
+        if cfg.use_4h_filter and not (row["h4_trend"] and row["h4_macd"]):
+            return None
+    # 最近的波段低點如果已經在價格之上（剛跌破），改用近 24 根最低點
+    base = row["swing_low"] if row["swing_low"] < close else row["low24"]
+    stop = base * (1 - cfg.stop_buffer)
     risk = close - stop
     if not cfg.min_risk <= risk / close <= cfg.max_risk:
         return None

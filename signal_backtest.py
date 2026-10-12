@@ -4,6 +4,9 @@
 2. 再用一年多的 1H K 線，在派網流動性夠的永續合約上跑一遍，看長期期望值
 
 出場：TP1 平一半並把停損移到進場價，剩下一半在 TP2 或停損出場，最多持有 7 天。
+TP2 設成 1R 時等於在 TP1 全部出場。
+
+python signal_backtest.py --universe top100 --suite group  # 市值前 100 名、群組訊號規則
 同一根 K 線同時碰到停損和停利時，保守當作先停損。
 """
 
@@ -19,6 +22,7 @@ import pandas as pd
 from grid_trading.breakout import BreakoutConfig, add_indicators, signal_at
 from grid_trading.history import fetch_history
 from grid_trading.pionex import PionexPublic
+from grid_trading.universe import perp_symbols
 
 # 截圖中的三則訊號（時間已從台北時間換成 UTC）
 KNOWN = [
@@ -94,6 +98,10 @@ def main() -> int:
     p.add_argument("--min-volume", type=float, default=5e6)
     p.add_argument("--cost", type=float, default=0.001, help="單邊手續費+滑價，預設 0.1%%")
     p.add_argument("--symbols", nargs="*")
+    p.add_argument("--universe", choices=["volume", "top100"], default="volume",
+                   help="volume：24h 成交額達標的合約；top100：市值前 100 名")
+    p.add_argument("--suite", choices=["base", "group"], default="base",
+                   help="base：突破規則 8 組參數；group：群組訊號的兩種進場（突破、回檔）比較")
     p.add_argument("--out", default="output")
     args = p.parse_args()
 
@@ -101,6 +109,8 @@ def main() -> int:
 
     if args.symbols:
         symbols = args.symbols
+    elif args.universe == "top100":
+        symbols = perp_symbols()
     else:
         api = PionexPublic()
         tickers = api.perp_tickers()
@@ -114,22 +124,35 @@ def main() -> int:
             data[sym] = df
     print(f"\n{len(data)} 個幣種，1H 資料", file=sys.stderr)
 
-    configs = [
-        BreakoutConfig(rsi_max=rmax, use_4h_filter=f, tp2_r=tp2)
-        for rmax, f, tp2 in itertools.product([75.0, 80.0], [True, False], [2.0, 3.0])
-    ]
+    if args.suite == "group":
+        # 群組 24 筆訊號的共同點：都做多、4H 在維加斯之上、TP1≈1R、TP2≈2R；進場有「突破」和「回檔」兩種
+        configs = [
+            BreakoutConfig(tp2_r=tp2) for tp2 in (1.0, 2.0)
+        ] + [
+            BreakoutConfig(trigger="pullback", pullback_rsi=r, min_risk=0.02, tp2_r=tp2)
+            for r, tp2 in itertools.product([40.0, 45.0], [1.0, 2.0])
+        ]
+    else:
+        configs = [
+            BreakoutConfig(rsi_max=rmax, use_4h_filter=f, tp2_r=tp2)
+            for rmax, f, tp2 in itertools.product([75.0, 80.0], [True, False], [2.0, 3.0])
+        ]
+    tier = {sym: ("前20" if i < 20 else "21-100") for i, sym in enumerate(perp_symbols())}
     rows, summary = [], []
     for cfg in configs:
         trades = []
         for sym, df in data.items():
             for t in simulate(add_indicators(df, cfg), cfg, args.cost):
-                trades.append({**t, "symbol": sym, "variant": cfg.label()})
+                trades.append({**t, "symbol": sym, "variant": cfg.label(), "tier": tier.get(sym, "")})
         res = pd.DataFrame(trades)
         if res.empty:
             continue
         rows.append(res)
         mid = res["time"].min() + (res["time"].max() - res["time"].min()) / 2
-        for period, part in (("全部", res), ("前半", res[res["time"] < mid]), ("後半", res[res["time"] >= mid])):
+        parts = [("全部", res), ("前半", res[res["time"] < mid]), ("後半", res[res["time"] >= mid])]
+        if args.universe == "top100":
+            parts += [(f"市值{t}", res[res["tier"] == t]) for t in ("前20", "21-100")]
+        for period, part in parts:
             summary.append({
                 "variant": cfg.label(), "period": period, "trades": len(part),
                 "tp1_rate": part["hit_tp1"].mean(), "stop_rate": (part["exit"] == "stop").mean(),
