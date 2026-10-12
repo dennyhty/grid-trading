@@ -3,7 +3,7 @@
 
 const TZ = "Asia/Taipei";
 const TZ_SHIFT = 8 * 3600; // 圖表用 UTC+8 顯示
-const INTERVAL_SEC = { "15M": 900, "30M": 1800, "60M": 3600, "4H": 14400, "8H": 28800, "12H": 43200, "1D": 86400 };
+const INTERVAL_SEC = { "15M": 900, "30M": 1800, "60M": 3600, "2H": 7200, "4H": 14400, "8H": 28800, "12H": 43200, "1D": 86400 };
 const LABEL = { "60M": "1H" };
 const KIND_TEXT = { TP1: "TP1 觸及", TP2: "TP2 觸及", TP3: "TP3 觸及", STOP_MOVED: "保護止損移動",
   SL: "止損出場", BE_EXIT: "保本出場", PROTECT_EXIT: "保護止損出場", TIMEOUT: "逾時平倉", NEW: "新訊號" };
@@ -11,6 +11,9 @@ const KIND_TEXT = { TP1: "TP1 觸及", TP2: "TP2 觸及", TP3: "TP3 觸及", STO
 let state = null;
 let tab = "OPEN";
 let market = (() => { try { return localStorage.getItem("market") || "crypto"; } catch { return "crypto"; } })();
+// 週期篩選：ALL 或 state.intervals 裡的一個（"4H"、"2H"）
+let ivFilter = (() => { try { return localStorage.getItem("iv") || "ALL"; } catch { return "ALL"; } })();
+const ivOf = (label) => (label === "1H" ? "60M" : label);
 const MARKET_LABEL = { crypto: "加密貨幣", stock: "美股", commodity: "商品" };
 let current = null;          // 目前打開的訊號
 let chart = null, candleSeries = null, emaSeries = {}, priceLines = [];
@@ -147,7 +150,7 @@ function liveHtml(name, iv) {
 function renderStats() {
   const parts = [];
   for (const [name, st] of Object.entries(state.strategies)) {
-    for (const iv of state.intervals.map((x) => (x === "1H" ? "60M" : x))) {
+    for (const iv of state.intervals.map(ivOf).filter((x) => ivFilter === "ALL" || x === ivFilter)) {
       const s = statsFor(name, market, iv);
       if (!s) {
         parts.push(`<h3>${esc(st.title)} · ${lbl(iv)} · ${MARKET_LABEL[market]}</h3>
@@ -236,13 +239,21 @@ function cardHtml(s) {
 }
 
 function renderList() {
+  if (ivFilter !== "ALL" && !state.intervals.map(ivOf).includes(ivFilter)) ivFilter = "ALL";
   renderStats();
   document.querySelectorAll(".mtab").forEach((b) => {
     const m = b.dataset.market;
     b.classList.toggle("active", m === market);
     b.querySelector("span").textContent = state.signals.filter((s) => mk(s) === m && s.track.status === "OPEN").length || "";
   });
-  const mine = state.signals.filter((s) => mk(s) === market);
+  const inMarket = state.signals.filter((s) => mk(s) === market);
+  const ivs = state.intervals.map(ivOf);
+  $("ivtabs").classList.toggle("hidden", ivs.length < 2);
+  $("ivtabs").innerHTML = ["ALL", ...ivs].map((iv) => {
+    const n = inMarket.filter((s) => (iv === "ALL" || s.interval === iv) && s.track.status === "OPEN").length;
+    return `<button class="ivtab ${iv === ivFilter ? "active" : ""}" data-iv="${iv}">${iv === "ALL" ? "全部週期" : lbl(iv)} <span>${n || ""}</span></button>`;
+  }).join("");
+  const mine = inMarket.filter((s) => ivFilter === "ALL" || s.interval === ivFilter);
   const open = mine.filter((s) => s.track.status === "OPEN");
   const closed = mine.filter((s) => s.track.status !== "OPEN");
   $("n-open").textContent = open.length;
@@ -481,14 +492,16 @@ document.querySelectorAll(".mtab").forEach((b) => b.addEventListener("click", ()
 }));
 document.querySelectorAll(".tab").forEach((b) => b.addEventListener("click", () => {
   tab = b.dataset.tab;
-  document.querySelectorAll(".mtab").forEach((b) => b.addEventListener("click", () => {
-  market = b.dataset.market;
-  try { localStorage.setItem("market", market); } catch { /* 私密模式 */ }
+  document.querySelectorAll(".tab").forEach((x) => x.classList.toggle("active", x === b));
   renderList();
 }));
-document.querySelectorAll(".tab").forEach((x) => x.classList.toggle("active", x === b));
+$("ivtabs").addEventListener("click", (e) => {
+  const b = e.target.closest(".ivtab");
+  if (!b) return;
+  ivFilter = b.dataset.iv;
+  try { localStorage.setItem("iv", ivFilter); } catch { /* 私密模式 */ }
   renderList();
-}));
+});
 $("back").addEventListener("click", closeDetail);
 $("bell").addEventListener("click", openNotes);
 $("notif-close").addEventListener("click", () => $("notif").classList.add("hidden"));
