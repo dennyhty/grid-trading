@@ -18,6 +18,8 @@
 - psar：1H 拋物線轉向指標（0.02/0.02/0.2）要在價格下方（多）或上方（空）。
 
 用 1H K 線跑，4H 指標由 1H 合成，只用已收盤的 4H K 線。
+其他週期也能跑：大週期 = 進場週期 × trend_mult（預設 4，例如 4H 進場看 16H、日線進場看 4 日線），
+大週期的 EMA 要先累積 169 根（均線組是 676 根）才開始判斷方向。
 """
 
 from __future__ import annotations
@@ -43,7 +45,7 @@ class VegasBreakout(Strategy):
                  pivot_k: int = 3, stop_buffer: float = 0.003, min_risk: float = 0.03, max_risk: float = 0.12,
                  tp_r: tuple[float, float, float] = (1.0, 2.0, 3.0), divergence: str = "none",
                  oil: str = "none", oil_symbol: str = "WTI_USDT_PERP", ribbon: bool = False,
-                 slow_ma: int = 0, hma: int = 0, psar: bool = False):
+                 slow_ma: int = 0, hma: int = 0, psar: bool = False, trend_mult: int = 4):
         # trend="vegas"：照 vegas_trend 的定義（收盤、EMA12 都在通道外，且通道方向一致）
         # trend="basic"：只看 4H 收盤在通道上方/下方（群組訊號回推時用的寬鬆版）
         self.trend = trend
@@ -63,6 +65,7 @@ class VegasBreakout(Strategy):
         self.slow_ma = slow_ma
         self.hma = hma
         self.psar = psar
+        self.trend_mult = trend_mult
 
     def prepare(self, df: pd.DataFrame) -> pd.DataFrame:
         df = df.copy()
@@ -96,7 +99,11 @@ class VegasBreakout(Strategy):
         df["low24"] = low.rolling(24).min()
         df["high24"] = high.rolling(24).max()
 
-        h4 = resample(df[["time", "open", "high", "low", "close", "volume"]], "4h")
+        bar = df["time"].diff().median()
+        span = bar * self.trend_mult
+        # 日線以下從當天 00:00 起算（1H 合成的 4H 和派網的 4H 對齊），更大的週期從第一根 K 線起算
+        origin = "start_day" if bar < pd.Timedelta(days=1) else df["time"].iloc[0]
+        h4 = resample(df[["time", "open", "high", "low", "close", "volume"]], span, origin)
         hc = h4["close"]
         e12, e144, e169 = ind.ema(hc, 12), ind.ema(hc, 144), ind.ema(hc, 169)
         top, bottom = pd.concat([e144, e169], axis=1).max(axis=1), pd.concat([e144, e169], axis=1).min(axis=1)
@@ -111,12 +118,14 @@ class VegasBreakout(Strategy):
             down = (hc < bottom) & (e12 < bottom) & (e144 < e169)
         else:
             up, down = hc > top, hc < bottom
+        warm = pd.Series(range(len(h4)), index=h4.index) >= (676 if self.ribbon else 169)
+        up, down = up & warm, down & warm
         h4f = pd.DataFrame({
-            "avail": h4["time"] + pd.Timedelta(hours=4),  # 這根 4H 收盤後才能用
+            "avail": h4["time"] + span,  # 這根大週期 K 線收盤後才能用
             "h4_up": up & (hist > 0) & (hist > hist.shift(1)),
             "h4_down": down & (hist < 0) & (hist < hist.shift(1)),
         })
-        df["bar_close"] = df["time"] + pd.Timedelta(hours=1)
+        df["bar_close"] = df["time"] + bar
         df = pd.merge_asof(df, h4f, left_on="bar_close", right_on="avail", direction="backward")
         df[["h4_up", "h4_down"]] = df[["h4_up", "h4_down"]].fillna(False).astype(bool)
         df = df.drop(columns=["avail"])

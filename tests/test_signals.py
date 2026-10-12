@@ -90,11 +90,11 @@ def test_vegas_trend_only_uses_past_data():
         assert (s.sl < s.price < s.tps[0]) if s.side == LONG else (s.sl > s.price > s.tps[0])
 
 
-def _trend_hours(n=1200, drift=0.0015, seed=1):
+def _trend_hours(n=1200, drift=0.0015, seed=1, freq="h"):
     rng = np.random.default_rng(seed)
     close = 100 * np.exp(np.cumsum(drift + 0.004 * rng.standard_normal(n)))
     df = pd.DataFrame({"close": close, "open": close, "high": close * 1.003, "low": close * 0.997, "volume": 1.0})
-    df["time"] = pd.date_range(T0, periods=n, freq="h", tz="UTC")
+    df["time"] = pd.date_range(T0, periods=n, freq=freq, tz="UTC")
     return df
 
 
@@ -113,6 +113,17 @@ def test_vegas_breakout_does_not_peek_ahead():
     full = [s.time for s in strat.scan(df, "X", "60M")]
     cut = [s.time for s in strat.scan(df.iloc[:900], "X", "60M")]
     assert [t for t in full if t <= df["time"].iloc[899]] == cut
+
+
+def test_vegas_breakout_on_daily_bars_waits_for_trend_warmup_and_does_not_peek():
+    df = _trend_hours(n=1000, drift=0.0015, freq="D")
+    strat = get("vegas_breakout", min_risk=0.0, max_risk=0.5)
+    full = strat.scan(df, "X", "1D")
+    assert full and all(s.side == LONG for s in full)
+    # 大週期是 4 日線，要先有 169 根（676 天）才判斷方向
+    assert min(s.time for s in full) > df["time"].iloc[0] + pd.Timedelta(days=676)
+    cut = [s.time for s in strat.scan(df.iloc[:850], "X", "1D")]
+    assert [s.time for s in full if s.time <= df["time"].iloc[849] + pd.Timedelta(days=1)] == cut
 
 
 def test_psar_flips_below_price_in_an_uptrend():
