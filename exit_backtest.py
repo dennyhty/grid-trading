@@ -2,6 +2,8 @@
 
 python exit_backtest.py --interval 4H [--fee 0.0005]
 
+需要另外 pip install numba（只有這支研究程式用到，網站不需要）。
+
 訊號本身不變（和實盤同一套 vegas_trend 進場條件），只換出場方式：
 - 止損：ATR 倍數、訊號 K 棒最低/最高價（可加緩衝或最小距離）、前 N 根最低/最高價。
 - 止盈：TP 的 R 倍數、各段平倉比例、保護止損怎麼移、最後一段改成追蹤止損。
