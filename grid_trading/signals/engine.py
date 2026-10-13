@@ -28,15 +28,17 @@ def label(interval: str) -> str:
     return LABEL.get(interval, interval)
 
 
-def _get_retry(api: PionexPublic, path: str, params: dict, tries: int = 4) -> dict | None:
-    """派網偶爾回錯（例如請求太密被限流），等一下再試；試完還是失敗就回傳 None。"""
+def _get_retry(api: PionexPublic, path: str, params: dict, tries: int = 4) -> tuple[dict | None, str]:
+    """派網偶爾回錯（例如請求太密被限流），等一下再試；試完還是失敗就回傳 (None, 錯誤訊息)。"""
+    err = ""
     for i in range(tries):
         try:
-            return api._get(path, params)
-        except Exception:
+            return api._get(path, params), ""
+        except Exception as e:
+            err = f"{type(e).__name__}: {str(e)[:120]}"
             if i < tries - 1:
                 time.sleep(1.5 * 2 ** i)
-    return None
+    return None, err
 
 
 def fetch_klines(api: PionexPublic, symbol: str, interval: str, bars: int = 1000) -> pd.DataFrame:
@@ -50,15 +52,16 @@ def fetch_klines(api: PionexPublic, symbol: str, interval: str, bars: int = 1000
         raw = fetch_klines(api, symbol, base, bars * k)
         df = resample(raw, f"{INTERVAL_MS[interval] // 3_600_000}h", origin="epoch") if len(raw) else raw
         df.attrs["incomplete"] = raw.attrs.get("incomplete", False)
+        df.attrs["error"] = raw.attrs.get("error", "")
         return df
     frames = []
     end = None
-    incomplete = False
+    incomplete, error = False, ""
     while bars > 0:
         params = {"symbol": symbol, "interval": interval, "limit": min(500, bars)}
         if end is not None:
             params["endTime"] = end
-        data = _get_retry(api, "/api/v1/market/klines", params)
+        data, error = _get_retry(api, "/api/v1/market/klines", params)
         if data is None:
             incomplete = True
             break
@@ -72,14 +75,14 @@ def fetch_klines(api: PionexPublic, symbol: str, interval: str, bars: int = 1000
         end = int(batch["time"].min()) - 1
     if not frames:
         df = pd.DataFrame(columns=["time", "open", "high", "low", "close", "volume"])
-        df.attrs["incomplete"] = incomplete
+        df.attrs["incomplete"], df.attrs["error"] = incomplete, error
         return df
     df = pd.concat(frames).drop_duplicates("time")
     for col in ("open", "high", "low", "close", "volume"):
         df[col] = pd.to_numeric(df[col], errors="coerce")
     df["time"] = pd.to_datetime(df["time"], unit="ms", utc=True)
     df = df.sort_values("time").reset_index(drop=True)
-    df.attrs["incomplete"] = incomplete
+    df.attrs["incomplete"], df.attrs["error"] = incomplete, error
     return df
 
 
@@ -91,6 +94,11 @@ class Engine:
         self.workers = workers  # 同時抓幾個 K 線（每條執行緒各用自己的連線）
         self._local = threading.local()
         self.failed: list[tuple[str, str]] = []
+        self.errors: dict[tuple[str, str], str] = {}
+        # 上一次掃描的訊號（網頁版從目前網站的 state.json 讀進來）。某個（幣, 週期）這次 K 線沒抓到時，
+        # 沿用上一次的訊號，網站上的單才不會整批消失
+        self.previous: dict[str, dict] = {}
+        self.carried = 0
         self.strategies = {s.name: s for s in strategies}
         self.symbols = symbols
         self.intervals = intervals
@@ -155,13 +163,20 @@ class Engine:
         now = pd.Timestamp.now(tz="UTC")
         found: dict[str, dict] = {}
         frames = self.klines_many([(sym, iv) for iv in self.intervals for sym in self.symbols])
-        # 重試後還是沒抓完整的（幣, 週期）；這些幣這次掃不到訊號，網頁版會因此不更新網站
+        # 重試後還是沒抓完整的（幣, 週期）：這些沿用上一次的訊號
         self.failed = sorted(k for k, df in frames.items() if df.attrs.get("incomplete"))
+        self.errors = {k: frames[k].attrs.get("error", "") for k in self.failed}
+        failed = set(self.failed)
+        self.carried = 0
+        for sid, old in (self.previous or self.signals).items():
+            if (old["symbol"], old["interval"]) in failed and now - pd.Timestamp(old["time"], unit="ms", tz="UTC") <= self.keep:
+                found[sid] = old
+                self.carried += 1
         for interval in self.intervals:
             bar = pd.Timedelta(milliseconds=INTERVAL_MS[interval])
             for sym in self.symbols:
                 df = frames[(sym, interval)]
-                if len(df) < 250:
+                if len(df) < 250 or (sym, interval) in failed:
                     continue
                 closed = df[df["time"] + bar <= now]
                 start = max(0, len(closed) - int(self.keep / bar) - 1)
