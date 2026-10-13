@@ -1,0 +1,14 @@
+name: probe
+on:
+  push:
+    branches: [claude/signal-app-0v6ppc]
+    paths: [".github/workflows/probe.yml"]
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          curl -sS "https://api.pionex.com/api/v1/common/symbols?type=PERP" | python3 -c "import json,sys;d=json.load(sys.stdin);s=[x['symbol'] for x in d['data']['symbols']];print(len(s),[x for x in s if x.startswith(('NVDAX','SPYX','XAU','WTI','TSLAX'))])"
+          curl -sS "https://api.pionex.com/api/v1/market/tickers?type=PERP" | python3 -c "import json,sys;d=json.load(sys.stdin);t=d['data']['tickers'];print(len(t),[(x['symbol'],x['amount']) for x in t if x['symbol'].startswith(('NVDAX','SPYX','XAU_','WTI'))])"
+          curl -sS "https://api.pionex.com/api/v1/market/klines?symbol=NVDAX_USDT_PERP&interval=4H&limit=3" | head -c 400; echo
+          curl -sS "https://api.pionex.com/api/v1/market/klines?symbol=XAU_USDT_PERP&interval=60M&limit=3" | head -c 400; echo
