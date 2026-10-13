@@ -45,6 +45,7 @@ function ivTabsEl() {
 const MARKET_LABEL = { crypto: "加密貨幣", stock: "美股", commodity: "商品" };
 let current = null;          // 目前打開的訊號
 let chart = null, candleSeries = null, emaSeries = {}, priceLines = [];
+let ind = null; // RSI / MACD 副圖的 series
 let chartData = null;
 let live = false;
 let notified = null;         // 已經跳過瀏覽器通知的 id
@@ -61,6 +62,22 @@ function fmtTime(ms, withSec = true) {
   return `${g("year")}/${g("month")}/${g("day")} ${g("hour")}:${g("minute")}${withSec ? ":" + g("second") : ""}`;
 }
 function fmtShort(ms) { return fmtTime(ms, false).slice(5); }
+// 訊號和事件的 time 是那根 K 線的「開盤」時間；訊號要等收盤才成立，TP / 止損則發生在那根 K 線裡某個時刻。
+// 網頁顯示收盤時間（= 實際確認、推播的時間），免得看起來比 Telegram 早一根 K 線。
+const barMs = (iv) => (INTERVAL_SEC[iv] || 0) * 1000;
+const ivOfId = (id) => String(id).split("|")[1];
+const closeTime = (ms, iv) => ms + barMs(iv);
+function hhmm(ms) { return fmtTime(ms, false).slice(11); }
+/** 事件發生在哪根 K 線：「10/13 10:00–12:00」。 */
+function barRange(ms, iv) { return `${fmtShort(ms)}–${hhmm(closeTime(ms, iv))}`; }
+/** 事件實際被偵測到的時間（台北時間）。網站每 15 分鐘掃一次，所以和真正觸價最多差 15 分鐘左右；
+ * 第一次上線補記的舊事件沒有偵測時間，改顯示它發生在哪根 K 線。 */
+function eventTime(sid, kind, t) {
+  const iv = ivOfId(sid);
+  const n = ((state && state.notifications) || []).find((x) => x.id === `${sid}|${kind}|${t}`);
+  if (n && !n.initial && n.created) return fmtTime(n.created, false);
+  return kind === "NEW" ? `${fmtTime(closeTime(t, iv), false)} 收盤確認` : `${barRange(t, iv)} 之間`;
+}
 function decimals(p) {
   if (!p) return 2;
   const a = Math.abs(p);
@@ -263,7 +280,7 @@ function timelineHtml(s) {
   return `<ul class="timeline">${ev.map((e) => {
     const bad = e.kind === "SL";
     return `<li class="${bad ? "bad" : ""}"><div>${esc(e.text)}</div>
-      <div class="t num">${fmtShort(e.time)} · ${fp(e.price, s.price)} · ${KIND_TEXT[e.kind] || e.kind}</div></li>`;
+      <div class="t num">${eventTime(s.id, e.kind, e.time)} · ${fp(e.price, s.price)} · ${KIND_TEXT[e.kind] || e.kind}</div></li>`;
   }).join("")}</ul>`;
 }
 
@@ -290,7 +307,7 @@ function cardHtml(s) {
       <span class="pair">${nameHtml(s)}</span>
       <span class="chip">${s.label}</span>${tagChip(s)}${tested(s) ? "" : `<span class="chip warn-chip">未回測</span>`}
       <span class="status ${st.cls}">${st.text}</span></div>
-    <div class="meta">${esc(title)} · ${ago(s.time)} · 訊號價 ${fp(s.price)}</div>
+    <div class="meta">${esc(title)} · ${ago(closeTime(s.time, s.interval))} · 訊號價 ${fp(s.price)}</div>
     <div class="pnl"><div class="big num ${pnl >= 0 ? "up" : "down"}">${pct(pnl)}<small>${s.track.status === "OPEN" ? "未實現盈虧" : "已實現盈虧"}（1x）</small></div>
       <div class="right num">價格 ${pct(mv)}<br>現價 ${fp(price, s.price)}</div></div>
     ${ladderHtml(s, price)}
@@ -338,7 +355,7 @@ function renderList() {
   const counts = state.markets ? Object.entries(state.markets).map(([m, v]) => `${v.label} ${v.symbols}`).join("、") : `${state.symbols} 個`;
   $("foot").textContent = `監看 ${counts} · 週期 ${state.intervals.join("/")} · ` +
     `最後掃描 ${state.updated ? fmtTime(state.updated) : "—"}` +
-    (STATIC ? ` · 訊號約每 5 分鐘由 GitHub 排程更新 · ${market === "crypto" && livePricesAt ? "現價來自 Binance 合約即時價" : "現價為掃描時的派網價格"}`
+    (STATIC ? ` · 訊號每 15 分鐘由 GitHub 排程更新（整點收盤後 2 分鐘就掃到新訊號） · ${market === "crypto" && livePricesAt ? "現價來自 Binance 合約即時價" : "現價為掃描時的派網價格"}`
       : " · 每 30 秒更新頁面");
 }
 
@@ -352,7 +369,7 @@ function renderDetailHead() {
   $("detail-head").innerHTML = `<div class="dh">
     <div class="row1"><span class="pair">${mk(s) === "crypto" ? pair(s.symbol) : nameHtml(s, true)}</span><span class="chip">${s.label}</span>${tagChip(s)}
       <span class="dir ${s.side === "LONG" ? "up" : "down"}">${s.side}</span></div>
-    <div class="muted">訊號時間 ${fmtTime(s.time)} · UTC+8</div>
+    <div class="muted">訊號時間 ${fmtTime(closeTime(s.time, s.interval))}（${s.label} K 線收盤確認）· UTC+8</div>
     <div class="prices"><div><span class="muted">訊號價格</span><b class="num">${fp(s.price)}</b></div>
       <div><span class="muted">現價</span><b class="num ${priceMove(s, price) >= 0 ? "up" : "down"}">${fp(price, s.price)}</b></div></div>
     <details><summary>RSI 與策略資訊</summary><div class="kv num">
@@ -425,6 +442,96 @@ function ensureChart() {
   candleSeries = chart.addCandlestickSeries({
     upColor: "#22c58b", downColor: "#f0697a", borderVisible: false, wickUpColor: "#22c58b", wickDownColor: "#f0697a",
   });
+  // RSI 與 MACD 各一張小圖，放在 K 線圖下方，左右捲動和縮放跟著 K 線圖同步
+  const sub = (id) => LightweightCharts.createChart($(id), {
+    autoSize: true,
+    layout: { background: { color: "#171a21" }, textColor: "#8a91a0" },
+    grid: { vertLines: { color: "#1f2430" }, horzLines: { color: "#1f2430" } },
+    rightPriceScale: { borderColor: "#262b36", minimumWidth: 80, scaleMargins: { top: 0.12, bottom: 0.08 } },
+    timeScale: { borderColor: "#262b36", visible: false },
+    crosshair: { mode: 0 },
+    handleScroll: false, handleScale: false,
+  });
+  chart.priceScale("right").applyOptions({ minimumWidth: 80 });
+  if (!$("panes")) {
+    $("chart").insertAdjacentHTML("afterend", `<div id="panes" class="panes">
+      <div class="pane-tag">RSI(14)</div><div id="rsi-chart" class="sub-chart" style="height:130px"></div>
+      <div class="pane-tag">MACD(12,26,9)</div><div id="macd-chart" class="sub-chart" style="height:120px"></div></div>`);
+  }
+  const rsiChart = sub("rsi-chart"), macdChart = sub("macd-chart");
+  const line = (c, color, w = 1) => c.addLineSeries({ color, lineWidth: w, priceLineVisible: false,
+    lastValueVisible: true, crosshairMarkerVisible: false, priceFormat: { type: "price", precision: 2, minMove: 0.01 } });
+  ind = {
+    charts: [rsiChart, macdChart],
+    rsi: rsiChart.addLineSeries({ color: "#b07cff", lineWidth: 1.5, priceLineVisible: false, crosshairMarkerVisible: false,
+      priceFormat: { type: "price", precision: 1, minMove: 0.1 },
+      autoscaleInfoProvider: () => ({ priceRange: { minValue: 15, maxValue: 85 } }) }),
+    hist: macdChart.addHistogramSeries({ priceLineVisible: false, lastValueVisible: false }),
+    dif: line(macdChart, "#4fb3d9"),
+    dea: line(macdChart, "#e6c35c"),
+  };
+  // vegas_trend 的 RSI 區間：做多 54–70、做空 30–46
+  for (const [v, c] of [[70, "#f0697a"], [54, "#22c58b"], [46, "#f0697a"], [30, "#22c58b"]]) {
+    ind.rsi.createPriceLine({ price: v, color: c, lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: "" });
+  }
+  chart.timeScale().subscribeVisibleLogicalRangeChange((r) => {
+    if (r) for (const c of ind.charts) c.timeScale().setVisibleLogicalRange(r);
+  });
+  layoutPanes();
+}
+
+/** 「顯示 RSI / MACD」開關。舊版 index.html 快取裡沒有這些元素時不做事。 */
+function layoutPanes() {
+  const opt = $("opt-ind"), panes = $("panes");
+  if (panes) panes.classList.toggle("hidden", !(opt ? opt.checked : true));
+  if (ind && chart) {
+    const r = chart.timeScale().getVisibleLogicalRange();
+    if (r) for (const c of ind.charts) c.timeScale().setVisibleLogicalRange(r);
+  }
+}
+
+/** Wilder RSI(14)，和後端 grid_trading/indicators.py 同算法。 */
+function calcRsi(closes, n = 14) {
+  const out = new Array(closes.length).fill(null);
+  let g = 0, l = 0;
+  for (let k = 1; k < closes.length; k++) {
+    const d = closes[k] - closes[k - 1];
+    const up = Math.max(d, 0), dn = Math.max(-d, 0);
+    if (k === 1) { g = up; l = dn; } else { g += (up - g) / n; l += (dn - l) / n; }
+    if (k >= n) out[k] = l === 0 ? 100 : 100 - 100 / (1 + g / l);
+  }
+  return out;
+}
+
+function calcEma(xs, n) {
+  const a = 2 / (n + 1), out = [];
+  xs.forEach((x, k) => out.push(k === 0 ? x : out[k - 1] + a * (x - out[k - 1])));
+  return out;
+}
+
+/** MACD(12,26,9)：DIF、DEA、柱狀體。 */
+function calcMacd(closes) {
+  const f = calcEma(closes, 12), sl = calcEma(closes, 26);
+  const dif = closes.map((_, k) => f[k] - sl[k]);
+  const dea = calcEma(dif, 9);
+  return { dif, dea, hist: dif.map((v, k) => v - dea[k]) };
+}
+
+function drawIndicators(candles) {
+  const closes = candles.map((c) => c.close);
+  const t = candles.map((c) => c.time + TZ_SHIFT);
+  const r = calcRsi(closes), m = calcMacd(closes);
+  const skip = 30; // 前幾根還在暖機，不畫
+  // 每張圖都放滿同樣的 K 線時間（暖機段只放時間不放值），三張圖的邏輯位置才會一一對齊
+  const pts = (arr) => arr.map((v, k) => (k < skip || v == null ? { time: t[k] } : { time: t[k], value: v }));
+  ind.rsi.setData(pts(r));
+  ind.dif.setData(pts(m.dif));
+  ind.dea.setData(pts(m.dea));
+  ind.hist.setData(m.hist.map((v, k) => ({ time: t[k], value: v,
+    color: v >= 0 ? (v >= (m.hist[k - 1] ?? 0) ? "#22c58b" : "#1d7a5a") : (v <= (m.hist[k - 1] ?? 0) ? "#f0697a" : "#93404b") }))
+    .map((p, k) => (k < skip ? { time: p.time } : p)));
+  const r0 = chart.timeScale().getVisibleLogicalRange();
+  if (r0) for (const c of ind.charts) c.timeScale().setVisibleLogicalRange(r0);
 }
 
 const EMA_COLORS = ["#e6c35c", "#4fb3d9", "#6f8cff", "#b07cff", "#d27cc0", "#9aa3b2"];
@@ -451,6 +558,8 @@ async function loadChart(interval, focusSignal) {
     const p = current.live;
     candleSeries.update({ ...lastC, time: lastC.time + TZ_SHIFT, close: p, high: Math.max(lastC.high, p), low: Math.min(lastC.low, p) });
   }
+  drawIndicators(STATIC && lastC && current.liveSource === "binance"
+    ? [...data.candles.slice(0, -1), { ...lastC, close: current.live }] : data.candles);
 
   for (const s of Object.values(emaSeries)) chart.removeSeries(s);
   emaSeries = {};
@@ -544,8 +653,9 @@ function renderNotes() {
   const seen = lastSeen();
   $("notif-list").innerHTML = state.notifications.map((n) => `
     <div class="note ${!n.initial && n.created > seen ? "new" : ""}" data-id="${esc(n.signal_id)}">
-      <div>${esc(n.text)}</div><div class="t num">${fmtTime(n.time)} · ${KIND_TEXT[n.kind] || n.kind}</div></div>`).join("") ||
+      <div>${esc(n.text)}</div><div class="t num">${eventTime(n.signal_id, n.kind, n.time)} · ${KIND_TEXT[n.kind] || n.kind}</div></div>`).join("") ||
     `<div class="empty">還沒有通知</div>`;
+  $("notif-list").insertAdjacentHTML("afterbegin", `<div class="muted" style="padding:4px 0 8px">時間是台北時間（UTC+8），網站偵測到事件的時間；每 15 分鐘掃一次（整點後 2 分鐘起），止盈止損和實際觸價最多差 15 分鐘左右；新訊號在 K 線收盤後約 2 分鐘就會出現。</div>`);
   const perm = "Notification" in window ? Notification.permission : "unsupported";
   $("notif-perm").classList.toggle("hidden", perm === "granted" || perm === "unsupported");
 }
@@ -620,6 +730,7 @@ $("btn-full").addEventListener("click", () => {
 });
 $("btn-more").addEventListener("click", () => $("more").classList.toggle("hidden"));
 $("opt-levels").addEventListener("change", drawLevels);
+$("opt-ind")?.addEventListener("change", () => chart && layoutPanes());
 $("opt-emas").addEventListener("change", (e) => Object.values(emaSeries).forEach((s) => s.applyOptions({ visible: e.target.checked })));
 
 function route() {

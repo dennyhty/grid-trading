@@ -1,11 +1,11 @@
-# 每 5 分鐘掃描一次訊號，把網頁和資料直接發佈到 GitHub Pages。
+# 每 15 分鐘掃描一次訊號，把網頁和資料直接發佈到 GitHub Pages。
 # 只用公開行情（派網 K 線；訂單流觀察組另外讀幣安的公開持倉量），不需要任何金鑰。
 # 需要的設定：Settings → Pages → Source 選「GitHub Actions」。
 name: 訊號網頁
 
 on:
   schedule:
-    - cron: "*/5 * * * *"   # 每 5 分鐘（GitHub 最短就是 5 分鐘），排程常會延遲幾分鐘
+    - cron: "2,17,32,47 * * * *"   # 每 15 分鐘，K 線整點收盤後 2 分鐘（實際由「訊號定時器」觸發，GitHub 排程常延遲或不觸發）
   workflow_dispatch:
     inputs:
       test_telegram:
