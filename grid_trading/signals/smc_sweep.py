@@ -10,6 +10,7 @@
 
 只在 4H 上跑。加密貨幣用幣安 2020 年起的資料驗證過，2024 年後的優勢在統計上還不夠確定，所以標成觀察組。
 2026-10-13 起也在美股、商品上跑（派網約一年的資料：美股 -0.06R、商品 +0.40R 但只有 55 筆），只觀察、不推播。
+美股、商品另外有 2H 版本（SmcSweep2H，Denny 要求補齊 4H/2H 觀察組）；加密貨幣 2H 在研究裡是負的，所以不跑。
 """
 
 from __future__ import annotations
@@ -87,7 +88,7 @@ class SmcSweep(Strategy):
         swept = "前低" if d > 0 else "前高"
         broke = "擺動高點" if d > 0 else "擺動低點"
         info = {
-            "reason": f"日線結構{'向上' if d > 0 else '向下'}；4H 掃掉{swept} {r.smc_sweep:.6g} 後收回，"
+            "reason": f"日線結構{'向上' if d > 0 else '向下'}；{_bar_hours(df):.0f}H 掃掉{swept} {r.smc_sweep:.6g} 後收回，"
                       f"收盤突破{broke} {r.smc_pivot:.6g}（{'轉向' if r.smc_kind == smc.CHOCH else '順勢'}）",
             "atr": float(r.atr),
             "details": [
@@ -101,6 +102,16 @@ class SmcSweep(Strategy):
                        "close": float(r.close), "time": int(r.time.timestamp() * 1000)},
         }
         return side, sl, [entry + d * k * risk for k in self.tp_r], info
+
+
+@register
+class SmcSweep2H(SmcSweep):
+    """同一套 SMC 規則跑在 2H，只給美股和商品當觀察組（派網約一年資料：美股 -0.03R、商品 +0.02R）。"""
+    name = "smc_sweep_2h"
+    title = "SMC 掃流動性 + 結構轉變 2H（觀察組）"
+    description = SmcSweep.description.replace("4H", "2H")
+    intervals = ("2H",)
+    markets = ("stock", "commodity")
 
 
 def _bar_hours(df: pd.DataFrame) -> float:
