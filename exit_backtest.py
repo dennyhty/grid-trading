@@ -59,7 +59,8 @@ STOPS = [
 ]
 
 # 止盈：(名稱, TP 的 R 倍數, 各段比例, 保護止損模式, 追蹤止損 ATR 倍數)
-# 保護模式 0：TP1 後移到保本、TP2 後移到 TP1（實盤）；1：TP2 後才移到保本；2：不移
+# 保護模式 0：TP1 後移到保本、TP2 後移到 TP1（實盤）；1：TP2 後才移到保本；2：不移；
+# 3：TP1 後 -0.5R、TP2 後保本；4：TP2 後才移到 TP1；5：TP1 後保本、之後不動；6：TP1 後 -0.5R、TP2 後 TP1
 EXITS = [
     ("1/2/3R 各1/3", (1, 2, 3), (1 / 3, 1 / 3, 1 / 3), 0, 0.0),  # 實盤
     ("1/2/4R 各1/3", (1, 2, 4), (1 / 3, 1 / 3, 1 / 3), 0, 0.0),
@@ -109,6 +110,20 @@ def track(high, low, close, start, d, entry, risk, tps, portions, protect, trail
                     stop = tps[0]
             elif protect == 1 and hit == 1:
                 stop = be
+            elif protect == 3:  # TP1 後移到 -0.5R，TP2 後移到保本
+                if hit == 0:
+                    stop = entry - d * 0.5 * risk
+                elif hit == 1:
+                    stop = be
+            elif protect == 4 and hit == 1:  # TP1 後不動，TP2 後移到 TP1
+                stop = tps[0]
+            elif protect == 5 and hit == 0:  # TP1 後移到保本，之後不再動
+                stop = be
+            elif protect == 6:  # TP1 後移到 -0.5R，TP2 後移到 TP1
+                if hit == 0:
+                    stop = entry - d * 0.5 * risk
+                elif hit == 1:
+                    stop = tps[0]
             hit += 1
         if remaining <= 1e-9:
             return r, hit, j, True
