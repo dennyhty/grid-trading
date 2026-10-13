@@ -351,7 +351,8 @@ function renderList() {
   $("n-closed").textContent = closed.length;
   const shown = tab === "OPEN" ? open : closed;
   $("cards").innerHTML = shown.map(cardHtml).join("") ||
-    `<div class="empty">${ivFilter === "ALL" ? "" : lbl(ivFilter) + " "}${tab === "OPEN" ? "目前沒有進行中的訊號" : "最近沒有已結束的訊號"}${hiddenNote(inMarket)}</div>`;
+    `<div class="empty">${ivFilter === "ALL" ? "" : lbl(ivFilter) + " "}${tab === "OPEN" ? "目前沒有進行中的訊號" : "最近沒有已結束的訊號"}${
+      tab === "OPEN" && closed.length ? `<br><small>最近 ${state.keep_days || 7} 天有 ${closed.length} 筆已經結束，點「已結束」查看</small>` : ""}${hiddenNote(inMarket)}</div>`;
   const counts = state.markets ? Object.entries(state.markets).map(([m, v]) => `${v.label} ${v.symbols}`).join("、") : `${state.symbols} 個`;
   $("foot").textContent = `監看 ${counts} · 週期 ${state.intervals.join("/")} · ` +
     `最後掃描 ${state.updated ? fmtTime(state.updated) : "—"}` +
