@@ -14,6 +14,11 @@
 
 RSI 範圍在 2026-10-12 從 50~70 / 30~50 收緊成 54~70 / 30~46：幣安 2H、4H 回測裡，不論用 2020~2023 年
 挑、2024 年後驗證，或反過來，收緊後每筆期望值和 Sharpe 都比較好，被剔除的那段 RSI 平均約 0R。
+
+2H 從 2026-10-13 起：訊號 K 棒的 ADX(14) ≥ 24 不做（MAX_ADX）。幣安 2020 年起，這些單約佔 2H 的 16%，
+2020-23 和 2024 年後每筆都約 0R；跳過後 Sharpe 1.39 → 1.59、勝率 53.8% → 54.6%，7 年裡 6 年比較好。
+派網 2H 只有 2025-09 起的資料，這段沒有改善；4H 用同樣規則也沒有幫助，所以只用在 2H
+（entry_research.py，報告 report_vegas_trend_entry_20261013.md）。
 """
 
 from __future__ import annotations
@@ -30,13 +35,15 @@ class VegasTrend(Strategy):
     title = "維加斯通道順勢 + MACD/RSI"
     description = ("價格在 EMA144/169 通道上方且通道向上時只做多、下方向下時只做空；"
                    "MACD 柱翻轉且 RSI 同向時進場。停損 1.5 倍 ATR；4H 在 1R 平一半、其餘 3 ATR 追蹤止損，"
-                   "2H 的 TP 為 1R/3R/5R 各平 1/4、最後 1/4 用 3 ATR 追蹤止損。")
+                   "2H 的 TP 為 1R/3R/5R 各平 1/4、最後 1/4 用 3 ATR 追蹤止損，且 ADX ≥ 24 時不做。")
     chart_emas = {"EMA12": 12, "EMA144": 144, "EMA169": 169, "EMA576": 576, "EMA676": 676}
     min_bars = 200
     EXIT_PLANS = {
         "4H": {"tp_r": [1.0], "portions": [0.5], "trail_atr": 3.0},
         "2H": {"tp_r": [1.0, 3.0, 5.0], "portions": [0.25, 0.25, 0.25], "trail_atr": 3.0},
     }
+    # 這些週期的訊號 K 棒 ADX(14) 達到門檻就不做
+    MAX_ADX = {"2H": 24.0}
 
     def __init__(self, sl_atr: float = 1.5, tp_r: tuple[float, float, float] = (1.0, 2.0, 3.0),
                  max_ext_atr: float = 3.0, rsi_long: tuple[float, float] = (54, 70),
@@ -50,6 +57,10 @@ class VegasTrend(Strategy):
     def exit_plan(self, interval: str) -> dict | None:
         return self.EXIT_PLANS.get(interval)
 
+    def accept(self, df: pd.DataFrame, i: int, interval: str) -> bool:
+        limit = self.MAX_ADX.get(interval)
+        return limit is None or not df["adx"].iat[i] >= limit
+
     def prepare(self, df: pd.DataFrame) -> pd.DataFrame:
         df = df.copy()
         c = df["close"]
@@ -60,6 +71,7 @@ class VegasTrend(Strategy):
         m = ind.macd(c)
         df["macd"], df["macd_signal"], df["hist"] = m["macd"], m["signal"], m["hist"]
         df["atr"] = ind.atr(df)
+        df["adx"] = ind.adx(df)
         return df
 
     def candidates(self, df: pd.DataFrame):
@@ -80,6 +92,7 @@ class VegasTrend(Strategy):
             "rsi": round(float(r.rsi), 2),
             "macd": float(r.macd), "macd_signal": float(r.macd_signal), "hist": float(hist),
             "atr": float(r.atr), "ema144": float(r.ema144), "ema169": float(r.ema169),
+            "adx": round(float(r.adx), 1) if pd.notna(r.adx) else None,
             "candle": {"open": float(r.open), "high": float(r.high), "low": float(r.low),
                        "close": float(r.close), "time": int(r.time.timestamp() * 1000)},
         }

@@ -393,6 +393,7 @@ function renderDetailHead() {
       <span>MACD DIF / DEA</span><span>${fp(i.macd, s.price)} / ${fp(i.macd_signal, s.price)}</span>
       <span>MACD 柱</span><span>${fp(i.hist, s.price)}</span>
       <span>ATR</span><span>${fp(i.atr, s.price)}</span>
+      ${i.adx != null ? `<span>ADX(14)</span><span>${i.adx}</span>` : ""}
       <span>EMA144 / 169</span><span>${fp(i.ema144)} / ${fp(i.ema169)}</span>`}
       ${a ? `<span>回測勝率</span><span>${(a.win_rate * 100).toFixed(1)}%（${a.trades} 筆）</span>
       <span>回測期望值</span><span>${a.expectancy_r.toFixed(3)}R / 筆</span>`
