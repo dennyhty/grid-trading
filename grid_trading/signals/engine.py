@@ -22,6 +22,9 @@ INTERVAL_MS = {"15M": 900_000, "30M": 1_800_000, "60M": 3_600_000, "2H": 7_200_0
 LABEL = {"60M": "1H"}
 # 派網沒有的週期，用較小的週期合成：週期 → (來源週期, 幾根合一根)。分組從 00:00 UTC 起算，和幣安的 2h K 線一致。
 SYNTHETIC = {"2H": ("60M", 2)}
+# 掃描時每個週期抓幾根。派網對同一個 IP 有請求量限制（超過回 429），2H 由 1H 合成、每根要 2 根 1H，
+# 所以只抓 500 根（1000 根 1H，2 次請求）；EMA169 用 500 根暖身已經夠準
+SCAN_BARS = {"2H": 500}
 
 
 def label(interval: str) -> str:
@@ -89,7 +92,7 @@ def fetch_klines(api: PionexPublic, symbol: str, interval: str, bars: int = 1000
 class Engine:
     def __init__(self, strategies: list[Strategy], symbols: list[str], intervals: list[str],
                  keep_days: float = 7, fee: float = 0.0005, state_dir: Path = Path("output"),
-                 stats_path: Path = Path("stats/signal_stats.json"), workers: int = 4):
+                 stats_path: Path = Path("stats/signal_stats.json"), workers: int = 2):
         self.api = PionexPublic(pause=0.1)
         self.workers = workers  # 同時抓幾個 K 線（每條執行緒各用自己的連線）
         self._local = threading.local()
@@ -99,6 +102,7 @@ class Engine:
         # 沿用上一次的訊號，網站上的單才不會整批消失
         self.previous: dict[str, dict] = {}
         self.carried = 0
+        self.frames: dict[tuple[str, str], pd.DataFrame] = {}  # 這次掃描抓到的 K 線，畫圖和實盤紀錄直接沿用
         self.strategies = {s.name: s for s in strategies}
         self.symbols = symbols
         self.intervals = intervals
@@ -120,9 +124,17 @@ class Engine:
         return self._local.api
 
     def klines_many(self, jobs: list[tuple[str, str]], bars: int = 1000) -> dict[tuple[str, str], pd.DataFrame]:
-        """同時抓多個（symbol, interval）的 K 線。"""
+        """同時抓多個（symbol, interval）的 K 線；SCAN_BARS 裡有的週期改用那個根數。"""
         with ThreadPoolExecutor(self.workers) as ex:
-            return dict(zip(jobs, ex.map(lambda j: fetch_klines(self.client(), j[0], j[1], bars), jobs)))
+            return dict(zip(jobs, ex.map(
+                lambda j: fetch_klines(self.client(), j[0], j[1], SCAN_BARS.get(j[1], bars)), jobs)))
+
+    def klines(self, symbol: str, interval: str, bars: int = 1000) -> pd.DataFrame:
+        """先用這次掃描抓到的 K 線（省一次請求），沒有才去抓。"""
+        df = self.frames.get((symbol, interval))
+        if df is not None and len(df) and not df.attrs.get("incomplete"):
+            return df.tail(bars).reset_index(drop=True)
+        return fetch_klines(self.client(), symbol, interval, bars)
 
     # ---------- 行情 ----------
     def prices(self) -> dict[str, float]:
@@ -137,7 +149,7 @@ class Engine:
         return self._prices
 
     def chart(self, symbol: str, interval: str, strategy: str | None = None, bars: int = 1000) -> dict:
-        df = fetch_klines(self.client(), symbol, interval, bars)
+        df = self.klines(symbol, interval, bars)
         strat = self.strategies.get(strategy or "") or next(iter(self.strategies.values()))
         lines = {}
         for name, n in strat.chart_emas.items():
@@ -163,6 +175,7 @@ class Engine:
         now = pd.Timestamp.now(tz="UTC")
         found: dict[str, dict] = {}
         frames = self.klines_many([(sym, iv) for iv in self.intervals for sym in self.symbols])
+        self.frames = frames
         # 重試後還是沒抓完整的（幣, 週期）：這些沿用上一次的訊號
         self.failed = sorted(k for k, df in frames.items() if df.attrs.get("incomplete"))
         self.errors = {k: frames[k].attrs.get("error", "") for k in self.failed}
