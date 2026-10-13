@@ -45,6 +45,7 @@ function ivTabsEl() {
 const MARKET_LABEL = { crypto: "加密貨幣", stock: "美股", commodity: "商品" };
 let current = null;          // 目前打開的訊號
 let chart = null, candleSeries = null, emaSeries = {}, priceLines = [];
+let ind = null; // RSI / MACD 副圖的 series
 let chartData = null;
 let live = false;
 let notified = null;         // 已經跳過瀏覽器通知的 id
@@ -441,6 +442,96 @@ function ensureChart() {
   candleSeries = chart.addCandlestickSeries({
     upColor: "#22c58b", downColor: "#f0697a", borderVisible: false, wickUpColor: "#22c58b", wickDownColor: "#f0697a",
   });
+  // RSI 與 MACD 各一張小圖，放在 K 線圖下方，左右捲動和縮放跟著 K 線圖同步
+  const sub = (id) => LightweightCharts.createChart($(id), {
+    autoSize: true,
+    layout: { background: { color: "#171a21" }, textColor: "#8a91a0" },
+    grid: { vertLines: { color: "#1f2430" }, horzLines: { color: "#1f2430" } },
+    rightPriceScale: { borderColor: "#262b36", minimumWidth: 80, scaleMargins: { top: 0.12, bottom: 0.08 } },
+    timeScale: { borderColor: "#262b36", visible: false },
+    crosshair: { mode: 0 },
+    handleScroll: false, handleScale: false,
+  });
+  chart.priceScale("right").applyOptions({ minimumWidth: 80 });
+  if (!$("panes")) {
+    $("chart").insertAdjacentHTML("afterend", `<div id="panes" class="panes">
+      <div class="pane-tag">RSI(14)</div><div id="rsi-chart" class="sub-chart" style="height:130px"></div>
+      <div class="pane-tag">MACD(12,26,9)</div><div id="macd-chart" class="sub-chart" style="height:120px"></div></div>`);
+  }
+  const rsiChart = sub("rsi-chart"), macdChart = sub("macd-chart");
+  const line = (c, color, w = 1) => c.addLineSeries({ color, lineWidth: w, priceLineVisible: false,
+    lastValueVisible: true, crosshairMarkerVisible: false, priceFormat: { type: "price", precision: 2, minMove: 0.01 } });
+  ind = {
+    charts: [rsiChart, macdChart],
+    rsi: rsiChart.addLineSeries({ color: "#b07cff", lineWidth: 1.5, priceLineVisible: false, crosshairMarkerVisible: false,
+      priceFormat: { type: "price", precision: 1, minMove: 0.1 },
+      autoscaleInfoProvider: () => ({ priceRange: { minValue: 15, maxValue: 85 } }) }),
+    hist: macdChart.addHistogramSeries({ priceLineVisible: false, lastValueVisible: false }),
+    dif: line(macdChart, "#4fb3d9"),
+    dea: line(macdChart, "#e6c35c"),
+  };
+  // vegas_trend 的 RSI 區間：做多 54–70、做空 30–46
+  for (const [v, c] of [[70, "#f0697a"], [54, "#22c58b"], [46, "#f0697a"], [30, "#22c58b"]]) {
+    ind.rsi.createPriceLine({ price: v, color: c, lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: "" });
+  }
+  chart.timeScale().subscribeVisibleLogicalRangeChange((r) => {
+    if (r) for (const c of ind.charts) c.timeScale().setVisibleLogicalRange(r);
+  });
+  layoutPanes();
+}
+
+/** 「顯示 RSI / MACD」開關。舊版 index.html 快取裡沒有這些元素時不做事。 */
+function layoutPanes() {
+  const opt = $("opt-ind"), panes = $("panes");
+  if (panes) panes.classList.toggle("hidden", !(opt ? opt.checked : true));
+  if (ind && chart) {
+    const r = chart.timeScale().getVisibleLogicalRange();
+    if (r) for (const c of ind.charts) c.timeScale().setVisibleLogicalRange(r);
+  }
+}
+
+/** Wilder RSI(14)，和後端 grid_trading/indicators.py 同算法。 */
+function calcRsi(closes, n = 14) {
+  const out = new Array(closes.length).fill(null);
+  let g = 0, l = 0;
+  for (let k = 1; k < closes.length; k++) {
+    const d = closes[k] - closes[k - 1];
+    const up = Math.max(d, 0), dn = Math.max(-d, 0);
+    if (k === 1) { g = up; l = dn; } else { g += (up - g) / n; l += (dn - l) / n; }
+    if (k >= n) out[k] = l === 0 ? 100 : 100 - 100 / (1 + g / l);
+  }
+  return out;
+}
+
+function calcEma(xs, n) {
+  const a = 2 / (n + 1), out = [];
+  xs.forEach((x, k) => out.push(k === 0 ? x : out[k - 1] + a * (x - out[k - 1])));
+  return out;
+}
+
+/** MACD(12,26,9)：DIF、DEA、柱狀體。 */
+function calcMacd(closes) {
+  const f = calcEma(closes, 12), sl = calcEma(closes, 26);
+  const dif = closes.map((_, k) => f[k] - sl[k]);
+  const dea = calcEma(dif, 9);
+  return { dif, dea, hist: dif.map((v, k) => v - dea[k]) };
+}
+
+function drawIndicators(candles) {
+  const closes = candles.map((c) => c.close);
+  const t = candles.map((c) => c.time + TZ_SHIFT);
+  const r = calcRsi(closes), m = calcMacd(closes);
+  const skip = 30; // 前幾根還在暖機，不畫
+  // 每張圖都放滿同樣的 K 線時間（暖機段只放時間不放值），三張圖的邏輯位置才會一一對齊
+  const pts = (arr) => arr.map((v, k) => (k < skip || v == null ? { time: t[k] } : { time: t[k], value: v }));
+  ind.rsi.setData(pts(r));
+  ind.dif.setData(pts(m.dif));
+  ind.dea.setData(pts(m.dea));
+  ind.hist.setData(m.hist.map((v, k) => ({ time: t[k], value: v,
+    color: v >= 0 ? (v >= (m.hist[k - 1] ?? 0) ? "#22c58b" : "#1d7a5a") : (v <= (m.hist[k - 1] ?? 0) ? "#f0697a" : "#93404b") }))
+    .map((p, k) => (k < skip ? { time: p.time } : p)));
+  const r0 = chart.timeScale().getVisibleLogicalRange();
+  if (r0) for (const c of ind.charts) c.timeScale().setVisibleLogicalRange(r0);
 }
 
 const EMA_COLORS = ["#e6c35c", "#4fb3d9", "#6f8cff", "#b07cff", "#d27cc0", "#9aa3b2"];
@@ -467,6 +558,8 @@ async function loadChart(interval, focusSignal) {
     const p = current.live;
     candleSeries.update({ ...lastC, time: lastC.time + TZ_SHIFT, close: p, high: Math.max(lastC.high, p), low: Math.min(lastC.low, p) });
   }
+  drawIndicators(STATIC && lastC && current.liveSource === "binance"
+    ? [...data.candles.slice(0, -1), { ...lastC, close: current.live }] : data.candles);
 
   for (const s of Object.values(emaSeries)) chart.removeSeries(s);
   emaSeries = {};
@@ -637,6 +730,7 @@ $("btn-full").addEventListener("click", () => {
 });
 $("btn-more").addEventListener("click", () => $("more").classList.toggle("hidden"));
 $("opt-levels").addEventListener("change", drawLevels);
+$("opt-ind")?.addEventListener("change", () => chart && layoutPanes());
 $("opt-emas").addEventListener("change", (e) => Object.values(emaSeries).forEach((s) => s.applyOptions({ visible: e.target.checked })));
 
 function route() {
