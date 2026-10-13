@@ -37,7 +37,9 @@ python signal_backtest.py          # 重跑回測，更新 stats/signal_stats.js
 ### 第一個策略：維加斯通道順勢 + MACD/RSI（`vegas_trend`）
 
 價格和 EMA12 都在 EMA144/169 通道上方、且 EMA144 > EMA169 時只找多單（反之只找空單）；MACD 柱翻正（翻負）、
-RSI 在 54~70（30~46）、價格離通道不超過 3 ATR 時進場。SL = 1.5 ATR；出場見上面（4H 1R 平一半 + 追蹤，2H 1R/3R/5R 各 1/4 + 追蹤）。
+RSI 在 54~70（30~46）、價格離通道不超過 3 ATR 時進場；2H 另外要求訊號 K 棒的 ADX(14) < 24（2026-10-13 起，
+`VegasTrend.MAX_ADX`，研究見 `entry_research.py`）。SL = 1.5 ATR；出場見上面（4H 1R 平一半 + 追蹤，2H 1R/3R/5R 各 1/4 + 追蹤）。
+進場規則改了以後，已經發出、還沒結束的單照樣追蹤到結束（就算新規則不會再出這一單），期間同一個幣不出新訊號。
 
 訊號只掃派網的合約、用派網的 K 線；回測則以**幣安 USDT 永續的歷史為主**（2020 年起，比派網長，涵蓋 2022 熊市），
 派網的回測為輔：`python signal_backtest.py --source binance`（月檔來自 data.binance.vision，只到上個月底；
