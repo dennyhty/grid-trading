@@ -13,7 +13,7 @@ function exitRuleText(s) {
   const e = s.exit || {};
   const n = s.tps.length;
   const parts = (e.portions || [1 / 3, 1 / 3, 1 / 3]).slice(0, n);
-  const fr = (p) => Math.abs(p - 0.5) < 1e-6 ? "一半" : Math.abs(p - 1 / 3) < 1e-6 ? "1/3" : `${Math.round(p * 100)}%`;
+  const fr = (p) => Math.abs(p - 0.5) < 1e-6 ? "一半" : Math.abs(p - 1 / 3) < 1e-6 ? "1/3" : Math.abs(p - 0.25) < 1e-6 ? "1/4" : `${Math.round(p * 100)}%`;
   const risk = Math.abs(s.price - s.sl);
   const rs = s.tps.map((t) => `${+(Math.abs(t - s.price) / risk).toFixed(2)}R`);
   let text = s.tps.map((_, k) => `TP${k + 1}（${rs[k]}）平${fr(parts[k])}`).join("、") + "；TP1 後止損移到 BE";
