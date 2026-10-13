@@ -81,3 +81,95 @@ def test_failed_fetch_keeps_previous_signals(tmp_path, monkeypatch):
     eng.scan_once()
     assert eng.failed == [("BTC_USDT_PERP", "2H")] and eng.carried == 1
     assert sid in eng.signals
+
+
+def test_events_are_matched_by_id_not_by_position(tmp_path):
+    eng = Engine([], [], ["4H"], state_dir=tmp_path)
+    now = int(time.time() * 1000)
+    sid, s = _sig(now - 8 * 3_600_000, "4H")
+    eng._notify({sid: s})  # 第一輪：只有 NEW
+    eng.notifications.append({"id": "other", "signal_id": "other", "kind": "NEW", "time": 0, "created": 0,
+                              "text": "", "initial": False})
+    # TP1、TP2 同一根 K 線觸及：兩個同時間的 STOP_MOVED 都要通知，而且只通知一次
+    t = now - 3_600_000
+    s["track"]["events"] = [{"kind": "TP1", "time": t, "text": "TP1"},
+                            {"kind": "STOP_MOVED", "time": t, "text": "保護止損設於 101"},
+                            {"kind": "TP2", "time": t, "text": "TP2"},
+                            {"kind": "STOP_MOVED", "time": t, "text": "保護止損設於 105"}]
+    eng._notify({sid: s})
+    eng._notify({sid: s})
+    texts = [n["text"] for n in eng.notifications if n["signal_id"] == sid and n["kind"] != "NEW"]
+    assert len(texts) == 4 and texts[-1].endswith("保護止損設於 105")
+
+    # 出場規則改了、事件清單變短：之後真正的新事件還是要推播（舊做法用數量比對會漏掉）
+    s["track"]["events"] = [{"kind": "TP1", "time": t, "text": "TP1"},
+                            {"kind": "SL", "time": now, "text": "止損出場"}]
+    eng._notify({sid: s})
+    sl = [n for n in eng.notifications if n["signal_id"] == sid and n["kind"] == "SL"]
+    assert len(sl) == 1 and sl[0]["initial"] is False
+
+    # 改規則後補出來、比已通知事件還早的事件：記錄但不推播
+    s["track"]["events"].insert(1, {"kind": "TRAIL_MOVED", "time": t + 60_000, "text": "追蹤止損移到 103"})
+    eng._notify({sid: s})
+    trail = [n for n in eng.notifications if n["signal_id"] == sid and n["kind"] == "TRAIL_MOVED"]
+    assert len(trail) == 1 and trail[0]["initial"] is True
+
+
+def test_trim_keeps_notifications_of_signals_still_on_the_site(tmp_path):
+    eng = Engine([], [], ["4H"], state_dir=tmp_path)
+    now = int(time.time() * 1000)
+    sid, s = _sig(now - 30 * 3_600_000, "4H", events=[{"kind": "TP1", "time": now - 20 * 3_600_000, "text": "TP1"}])
+    eng._notify({sid: s})
+    eng.notifications += [{"id": f"x{i}", "signal_id": f"x{i}", "kind": "NEW", "time": 0, "created": 0,
+                           "text": "", "initial": False} for i in range(400)]
+    s["track"]["events"].append({"kind": "TP2", "time": now, "text": "TP2"})
+    eng._notify({sid: s})
+    mine = [n for n in eng.notifications if n["signal_id"] == sid]
+    assert [n["kind"] for n in mine] == ["NEW", "TP1", "TP2"]
+    assert mine[-1]["initial"] is False
+    assert len(eng.notifications) == 300 + 2  # 其他的只留最近 300 則
+
+
+def _candles(n, start_ms, bar_ms, price=100.0, highs=None):
+    import pandas as pd
+    rows = []
+    for i in range(n):
+        h = (highs or {}).get(i, price + 0.5)
+        rows.append({"time": pd.Timestamp(start_ms + i * bar_ms, unit="ms", tz="UTC"), "open": price,
+                     "high": h, "low": price - 0.5, "close": price, "volume": 1.0})
+    df = pd.DataFrame(rows)
+    df.attrs.update(incomplete=False, error="")
+    return df
+
+
+def test_open_signal_older_than_keep_days_is_still_tracked(tmp_path, monkeypatch):
+    from grid_trading.signals.strategy import Strategy
+
+    class Quiet(Strategy):
+        name = "vegas_trend"
+
+        def scan(self, df, symbol, interval, start=None):
+            return []
+
+    bar = 14_400_000
+    now = int(time.time() * 1000) // bar * bar + 60_000
+    df = _candles(300, now - 300 * bar, bar, highs={295: 106.0})  # 第 295 根碰到 TP1
+    sig_time = int(df["time"].iloc[200].timestamp() * 1000)  # 約 16 天前，已經超過 keep_days=7
+    sid = f"BTC_USDT_PERP|4H|vegas_trend|{sig_time // 1000}"
+    old = {"id": sid, "label": "4H", "market": "crypto", "name": "BTC", "symbol": "BTC_USDT_PERP", "interval": "4H",
+           "side": "LONG", "time": sig_time, "price": 100.0, "sl": 95.0, "tps": [105.0, 110.0, 115.0],
+           "strategy": "vegas_trend", "info": {}, "track": {"status": "OPEN", "events": []}}
+    eng = Engine([Quiet()], ["BTC_USDT_PERP"], ["4H"], state_dir=tmp_path)
+    eng.notifications = [{"id": f"{sid}|NEW|{sig_time}", "signal_id": sid, "kind": "NEW", "time": sig_time,
+                          "created": sig_time, "text": "", "initial": False}]
+    eng.previous = {sid: old}
+    monkeypatch.setattr(eng, "klines_many", lambda jobs, bars=1000: {j: df for j in jobs})
+    eng.scan_once()
+    assert sid in eng.signals and eng.signals[sid]["track"]["tps_hit"] == 1
+    tp1 = [n for n in eng.notifications if n["signal_id"] == sid and n["kind"] == "TP1"]
+    assert len(tp1) == 1 and tp1[0]["initial"] is False
+
+    # 已結束的單：這一輪推完出場通知，下一輪就不再追蹤
+    eng.previous = {sid: {**old, "track": {"status": "CLOSED", "events": []}}}
+    eng.scan_once()
+    assert sid not in eng.signals

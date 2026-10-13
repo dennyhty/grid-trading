@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import threading
 import time
+from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -14,7 +15,7 @@ from .. import indicators as ind
 from ..history import resample
 from ..markets import LABELS as MARKET_LABELS, classify, display_name
 from ..pionex import PionexPublic
-from .strategy import Strategy
+from .strategy import Signal, Strategy
 from .tracker import track
 
 INTERVAL_MS = {"15M": 900_000, "30M": 1_800_000, "60M": 3_600_000, "2H": 7_200_000, "4H": 14_400_000,
@@ -181,10 +182,17 @@ class Engine:
         self.errors = {k: frames[k].attrs.get("error", "") for k in self.failed}
         failed = set(self.failed)
         self.carried = 0
+        # 還沒結束的單（含已經超過 keep_days、離開掃描範圍的）：這次照樣追蹤到結束為止，
+        # 網站上的持倉才不會在第 7 天消失，之後的 TP / 止損也照樣推播
+        lingering: dict[tuple, list[dict]] = {}
         for sid, old in (self.previous or self.signals).items():
-            if (old["symbol"], old["interval"]) in failed and now - pd.Timestamp(old["time"], unit="ms", tz="UTC") <= self.keep:
-                found[sid] = old
-                self.carried += 1
+            is_open = (old.get("track") or {}).get("status") == "OPEN"
+            if (old["symbol"], old["interval"]) in failed:
+                if is_open or now - pd.Timestamp(old["time"], unit="ms", tz="UTC") <= self.keep:
+                    found[sid] = old
+                    self.carried += 1
+            elif is_open:
+                lingering.setdefault((old["symbol"], old["interval"], old.get("strategy")), []).append(old)
         for interval in self.intervals:
             bar = pd.Timedelta(milliseconds=INTERVAL_MS[interval])
             for sym in self.symbols:
@@ -193,11 +201,26 @@ class Engine:
                     continue
                 closed = df[df["time"] + bar <= now]
                 start = max(0, len(closed) - int(self.keep / bar) - 1)
+                # 這次掃描最早能找到的訊號時間（訊號時間 = 訊號 K 線的收盤時間）
+                window = closed["time"].iloc[start] + bar if len(closed) else now
                 for strat in self.strategies.values():
                     if (strat.intervals and interval not in strat.intervals) or \
                             (strat.markets and classify(sym) not in strat.markets):
                         continue
                     busy_until = None
+                    for old in sorted(lingering.get((sym, interval, strat.name), []), key=lambda o: o["time"]):
+                        t0 = pd.Timestamp(old["time"], unit="ms", tz="UTC")
+                        if t0 >= window:
+                            continue  # 還在掃描範圍內，下面會重新掃到
+                        if df["time"].iloc[0] > t0:
+                            found[old["id"]] = old  # K 線不夠長，沒辦法重新追蹤，先沿用
+                            busy_until = now + bar
+                            continue
+                        sig = Signal(sym, interval, old["side"], t0, old["price"], old["sl"], list(old["tps"]),
+                                     strat.name, old.get("info") or {}, old.get("exit") or {})
+                        res = track(sig, df, self.fee)
+                        found[old["id"]] = {**old, "track": res.to_dict()}
+                        busy_until = res.events[-1].time if res.status == "CLOSED" else now + bar
                     for sig in strat.scan(closed, sym, interval, start=start):
                         if busy_until is not None and sig.time < busy_until:
                             continue
@@ -218,6 +241,12 @@ class Engine:
     def _notify(self, found: dict[str, dict]) -> None:
         first_run = not self.signals and not self.notifications
         now = time.time() * 1000
+        # 已經寫過的通知（同一個 id 可能出現兩次：TP1、TP2 在同一根 K 線觸及時，會有兩個同時間的 STOP_MOVED）
+        have = Counter(n["id"] for n in self.notifications)
+        latest: dict[str, int] = {}  # 每個訊號已通知過的最新事件時間
+        for n in self.notifications:
+            if n["kind"] != "NEW":
+                latest[n["signal_id"]] = max(latest.get(n["signal_id"], 0), n["time"])
         for sid, s in found.items():
             old = self.signals.get(sid)
             pair = s["name"] if s["market"] != "crypto" else s["symbol"].replace("_USDT_PERP", "/USDT")
@@ -230,14 +259,21 @@ class Engine:
                 # 第一次出現時已經是 3 根 K 線以前的訊號（例如剛加上的新週期補掃到的舊訊號）：記下來但不推播
                 quiet = quiet or now - s["time"] > 3 * INTERVAL_MS[s["interval"]]
                 self._push(sid, "NEW", s["time"], f"{pair} {s['label']} {side}訊號 @ {s['price']:.6g}", quiet)
-            seen = len(old["track"]["events"]) if old else self._seen_events(sid)
-            for e in s["track"]["events"][seen:]:
-                self._push(sid, e["kind"], e["time"], f"{pair} {s['label']} {side}：{e['text']}", quiet)
-        self.notifications = self.notifications[-300:]
+            # 用通知 id 比對哪些事件已經通知過，不用「第幾個事件」：出場規則改了、事件清單跟著變時，
+            # 用數量比對會漏推或推錯
+            count: Counter = Counter()
+            for e in s["track"]["events"]:
+                nid = f"{sid}|{e['kind']}|{e['time']}"
+                count[nid] += 1
+                if count[nid] > have[nid]:
+                    have[nid] += 1
+                    # 比已通知的事件還早：是出場規則改了、重新追蹤補出來的舊事件，只記錄不推播
+                    late = e["time"] < latest.get(sid, 0)
+                    self._push(sid, e["kind"], e["time"], f"{pair} {s['label']} {side}：{e['text']}", quiet or late)
+        # 只保留最近 300 則，但網站上還在的訊號，它的通知全部留著（不然下次會當成沒通知過）
+        cut = len(self.notifications) - 300
+        self.notifications = [n for i, n in enumerate(self.notifications) if i >= cut or n["signal_id"] in found]
         self._save_notifications()
-
-    def _seen_events(self, sid: str) -> int:
-        return sum(1 for n in self.notifications if n["signal_id"] == sid and n["kind"] != "NEW")
 
     def _push(self, sid: str, kind: str, t: int, text: str, quiet: bool) -> None:
         self.notifications.append({"id": f"{sid}|{kind}|{t}", "signal_id": sid, "kind": kind, "time": t,
