@@ -23,7 +23,7 @@ from pathlib import Path
 from grid_trading import signals
 from grid_trading.markets import COMMODITY, CRYPTO, STOCK
 from grid_trading.signals import ledger as ledger_mod
-from grid_trading.signals.engine import Engine, fetch_klines
+from grid_trading.signals.engine import Engine
 from signal_backtest import liquid_symbols
 from signal_server import _sanitize
 
@@ -88,7 +88,7 @@ def main() -> int:
     state["static"] = True
 
     previous = json.loads(Path(args.ledger).read_text()) if args.ledger and Path(args.ledger).exists() else []
-    book = ledger_mod.update(previous, state["signals"], lambda sym, iv: fetch_klines(engine.client(), sym, iv, 1000),
+    book = ledger_mod.update(previous, state["signals"], lambda sym, iv: engine.klines(sym, iv, 1000),
                              engine.fee)
     write_json(data / "ledger.json", book)
     state["ledger"] = ledger_mod.summary(book)
@@ -98,7 +98,7 @@ def main() -> int:
     charts: dict[tuple[str, str], tuple[str, int]] = {}  # (幣, 週期) → (策略, 根數)；訊號本身的週期多抓一些
     for sym, sig_iv, strat in sorted(pairs):
         for iv in dict.fromkeys([sig_iv, *CHART_INTERVALS]):
-            bars = 1000 if iv == sig_iv else 700
+            bars = 1000 if iv == sig_iv else 500  # 其他週期只抓一頁（500 根），減少對派網的請求
             if charts.get((sym, iv), ("", 0))[1] < bars:
                 charts[(sym, iv)] = (strat, bars)
 
