@@ -69,6 +69,14 @@ const closeTime = (ms, iv) => ms + barMs(iv);
 function hhmm(ms) { return fmtTime(ms, false).slice(11); }
 /** 事件發生在哪根 K 線：「10/13 10:00–12:00」。 */
 function barRange(ms, iv) { return `${fmtShort(ms)}–${hhmm(closeTime(ms, iv))}`; }
+/** 事件實際被偵測到的時間（台北時間）。網站每 5 分鐘掃一次，所以和真正觸價最多差幾分鐘；
+ * 第一次上線補記的舊事件沒有偵測時間，改顯示它發生在哪根 K 線。 */
+function eventTime(sid, kind, t) {
+  const iv = ivOfId(sid);
+  const n = ((state && state.notifications) || []).find((x) => x.id === `${sid}|${kind}|${t}`);
+  if (n && !n.initial && n.created) return fmtTime(n.created, false);
+  return kind === "NEW" ? `${fmtTime(closeTime(t, iv), false)} 收盤確認` : `${barRange(t, iv)} 之間`;
+}
 function decimals(p) {
   if (!p) return 2;
   const a = Math.abs(p);
@@ -271,7 +279,7 @@ function timelineHtml(s) {
   return `<ul class="timeline">${ev.map((e) => {
     const bad = e.kind === "SL";
     return `<li class="${bad ? "bad" : ""}"><div>${esc(e.text)}</div>
-      <div class="t num">${barRange(e.time, s.interval)} · ${fp(e.price, s.price)} · ${KIND_TEXT[e.kind] || e.kind}</div></li>`;
+      <div class="t num">${eventTime(s.id, e.kind, e.time)} · ${fp(e.price, s.price)} · ${KIND_TEXT[e.kind] || e.kind}</div></li>`;
   }).join("")}</ul>`;
 }
 
@@ -552,9 +560,9 @@ function renderNotes() {
   const seen = lastSeen();
   $("notif-list").innerHTML = state.notifications.map((n) => `
     <div class="note ${!n.initial && n.created > seen ? "new" : ""}" data-id="${esc(n.signal_id)}">
-      <div>${esc(n.text)}</div><div class="t num">${n.kind === "NEW" ? fmtTime(closeTime(n.time, ivOfId(n.signal_id)), false) + " 收盤確認"
-        : barRange(n.time, ivOfId(n.signal_id)) + " 之間"} · ${KIND_TEXT[n.kind] || n.kind}</div></div>`).join("") ||
+      <div>${esc(n.text)}</div><div class="t num">${eventTime(n.signal_id, n.kind, n.time)} · ${KIND_TEXT[n.kind] || n.kind}</div></div>`).join("") ||
     `<div class="empty">還沒有通知</div>`;
+  $("notif-list").insertAdjacentHTML("afterbegin", `<div class="muted" style="padding:4px 0 8px">時間是台北時間（UTC+8），網站偵測到事件的時間；每 5 分鐘掃一次，和實際觸價最多差幾分鐘。</div>`);
   const perm = "Notification" in window ? Notification.permission : "unsupported";
   $("notif-perm").classList.toggle("hidden", perm === "granted" || perm === "unsupported");
 }
