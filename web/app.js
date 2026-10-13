@@ -14,6 +14,18 @@ let market = (() => { try { return localStorage.getItem("market") || "crypto"; }
 // 週期篩選：ALL 或 state.intervals 裡的一個（"4H"、"2H"）
 let ivFilter = (() => { try { return localStorage.getItem("iv") || "ALL"; } catch { return "ALL"; } })();
 const ivOf = (label) => (label === "1H" ? "60M" : label);
+/** 週期篩選列。瀏覽器快取了舊版 index.html 時沒有這個元素，就自己補在市場分頁下面，免得整頁的程式停住。 */
+function ivTabsEl() {
+  let el = document.getElementById("ivtabs");
+  if (!el) {
+    el = document.createElement("div");
+    el.id = "ivtabs";
+    el.className = "tabs ivtabs hidden";
+    const row = document.querySelector(".mtabs-row");
+    if (row) row.after(el); else document.body.prepend(el);
+  }
+  return el;
+}
 const MARKET_LABEL = { crypto: "加密貨幣", stock: "美股", commodity: "商品" };
 let current = null;          // 目前打開的訊號
 let chart = null, candleSeries = null, emaSeries = {}, priceLines = [];
@@ -147,7 +159,27 @@ function liveHtml(name, iv) {
     回測每筆約 +0.07R，要累積幾百筆才看得出差別。</div></div>`;
 }
 
+/** 「全部週期」時每個週期只列一行摘要，讓下面的持倉清單不會被擠到很下面；點 4H / 2H 看完整數字。 */
+function compactStats() {
+  const rows = [];
+  for (const [name, st] of Object.entries(state.strategies)) {
+    for (const iv of state.intervals.map(ivOf)) {
+      const s = statsFor(name, market, iv);
+      const a = (s && s.all) || {};
+      const g = ((state.ledger || {}).groups || {})[`${name}|${market}|${iv}`];
+      const ex = (g && g.excluded) || { trades: 0, sum_r: 0, open: 0 };
+      const n = g && g.all ? g.all.trades - ex.trades : 0;
+      const live = g && g.all ? `實盤 ${n} 筆${n ? ` ${fmtR((g.all.sum_r - ex.sum_r) / n)}` : ""}，持倉中 ${g.all.open - ex.open}` : "";
+      const bt = a.trades ? `回測 ${fmtR(a.expectancy_r)}，勝率 ${(a.win_rate * 100).toFixed(1)}%，${a.trades} 筆`
+        : `還沒有在${MARKET_LABEL[market]}回測過`;
+      rows.push(`<div><b>${esc(st.title)} · ${lbl(iv)}</b><div class="muted">${bt}${live ? "；" + live : ""}</div></div>`);
+    }
+  }
+  return `${rows.join("")}<div class="muted">點上方 ${state.intervals.join(" / ")} 看完整回測和風險說明。</div>`;
+}
+
 function renderStats() {
+  if (ivFilter === "ALL" && state.intervals.length > 1) { $("stats").innerHTML = compactStats(); return; }
   const parts = [];
   for (const [name, st] of Object.entries(state.strategies)) {
     for (const iv of state.intervals.map(ivOf).filter((x) => ivFilter === "ALL" || x === ivFilter)) {
@@ -238,6 +270,13 @@ function cardHtml(s) {
   </div>`;
 }
 
+/** 選了單一週期而且清單是空的時候，提醒其他週期還有幾筆。 */
+function hiddenNote(inMarket) {
+  if (ivFilter === "ALL") return "";
+  const n = inMarket.filter((s) => s.interval !== ivFilter && (tab === "OPEN") === (s.track.status === "OPEN")).length;
+  return n ? `<br><span class="muted">其他週期還有 ${n} 筆，點上方「全部週期」查看</span>` : "";
+}
+
 function renderList() {
   if (ivFilter !== "ALL" && !state.intervals.map(ivOf).includes(ivFilter)) ivFilter = "ALL";
   renderStats();
@@ -248,8 +287,8 @@ function renderList() {
   });
   const inMarket = state.signals.filter((s) => mk(s) === market);
   const ivs = state.intervals.map(ivOf);
-  $("ivtabs").classList.toggle("hidden", ivs.length < 2);
-  $("ivtabs").innerHTML = ["ALL", ...ivs].map((iv) => {
+  ivTabsEl().classList.toggle("hidden", ivs.length < 2);
+  ivTabsEl().innerHTML = ["ALL", ...ivs].map((iv) => {
     const n = inMarket.filter((s) => (iv === "ALL" || s.interval === iv) && s.track.status === "OPEN").length;
     return `<button class="ivtab ${iv === ivFilter ? "active" : ""}" data-iv="${iv}">${iv === "ALL" ? "全部週期" : lbl(iv)} <span>${n || ""}</span></button>`;
   }).join("");
@@ -260,7 +299,7 @@ function renderList() {
   $("n-closed").textContent = closed.length;
   const shown = tab === "OPEN" ? open : closed;
   $("cards").innerHTML = shown.map(cardHtml).join("") ||
-    `<div class="empty">${tab === "OPEN" ? "目前沒有進行中的訊號" : "最近沒有已結束的訊號"}</div>`;
+    `<div class="empty">${ivFilter === "ALL" ? "" : lbl(ivFilter) + " "}${tab === "OPEN" ? "目前沒有進行中的訊號" : "最近沒有已結束的訊號"}${hiddenNote(inMarket)}</div>`;
   const counts = state.markets ? Object.entries(state.markets).map(([m, v]) => `${v.label} ${v.symbols}`).join("、") : `${state.symbols} 個`;
   $("foot").textContent = `監看 ${counts} · 週期 ${state.intervals.join("/")} · ` +
     `最後掃描 ${state.updated ? fmtTime(state.updated) : "—"}` +
@@ -495,7 +534,7 @@ document.querySelectorAll(".tab").forEach((b) => b.addEventListener("click", () 
   document.querySelectorAll(".tab").forEach((x) => x.classList.toggle("active", x === b));
   renderList();
 }));
-$("ivtabs").addEventListener("click", (e) => {
+ivTabsEl().addEventListener("click", (e) => {
   const b = e.target.closest(".ivtab");
   if (!b) return;
   ivFilter = b.dataset.iv;
