@@ -70,13 +70,27 @@ def send(messages: list[str], token: str, chat_id: str) -> tuple[int, int]:
     for i, text in enumerate(messages):
         body = urllib.parse.urlencode({"chat_id": chat_id, "text": f"{text}\n{SITE_URL}",
                                        "disable_web_page_preview": "true"}).encode()
-        try:
-            urllib.request.urlopen(url, body, timeout=20).read()
-        except Exception as e:  # 錯誤訊息不含 token（只印類型和狀態碼）
-            failed += 1
-            print(f"第 {i + 1} 則送出失敗：{type(e).__name__} {getattr(e, 'code', '')}", file=sys.stderr)
-        time.sleep(1.1)  # Telegram 對同一個聊天大約每秒 1 則
+        for attempt in range(3):  # 這一輪沒送到，下一輪也不會再送，所以失敗時等一下重試
+            try:
+                urllib.request.urlopen(url, body, timeout=20).read()
+                break
+            except Exception as e:  # 錯誤訊息不含 token（只印類型和狀態碼）
+                code = getattr(e, "code", "")
+                print(f"第 {i + 1} 則送出失敗：{type(e).__name__} {code}", file=sys.stderr)
+                if attempt == 2 or (isinstance(code, int) and 400 <= code < 500 and code != 429):
+                    failed += 1  # 400/401/403 之類重試也沒用
+                    break
+                time.sleep(_retry_after(e) if code == 429 else 3)
+        time.sleep(1.1)  # Telegram 對同一個聊天大約每秒 1 則（群組每分鐘 20 則，超過會回 429）
     return len(messages) - failed, failed
+
+
+def _retry_after(e: Exception) -> float:
+    """Telegram 回 429 時，回應裡的 parameters.retry_after 是要等幾秒。"""
+    try:
+        return min(60.0, float(json.loads(e.read())["parameters"]["retry_after"]) + 1)
+    except Exception:
+        return 5.0
 
 
 def main(argv: list[str]) -> int:

@@ -57,3 +57,39 @@ def test_outbox_skips_observation_groups(tmp_path):
     _write(data / "state.json", {"signals": [], "strategies": {
         "vegas_trend": {"tag": ""}, "smc_sweep": {"tag": "SMC觀察組"}, "oi_build": {"tag": "訂單流觀察組"}}})
     assert build_outbox(data, tmp_path / "prev.json") == [live]
+
+
+def test_send_retries_after_telegram_rate_limit(monkeypatch):
+    import io
+    import urllib.error
+
+    calls = []
+
+    def fake(url, body, timeout):
+        calls.append(body)
+        if len(calls) == 1:
+            raise urllib.error.HTTPError(url, 429, "Too Many Requests", {},
+                                         io.BytesIO(b'{"ok":false,"parameters":{"retry_after":3}}'))
+        return _Resp()
+
+    waits = []
+    monkeypatch.setattr("urllib.request.urlopen", fake)
+    monkeypatch.setattr("time.sleep", waits.append)
+    assert send(["m1", "m2"], "TOKEN", "1") == (2, 0)
+    assert len(calls) == 3 and 4.0 in waits
+
+
+def test_send_does_not_retry_bad_requests(monkeypatch):
+    import io
+    import urllib.error
+
+    calls = []
+
+    def fake(url, body, timeout):
+        calls.append(body)
+        raise urllib.error.HTTPError(url, 400, "Bad Request", {}, io.BytesIO(b"{}"))
+
+    monkeypatch.setattr("urllib.request.urlopen", fake)
+    monkeypatch.setattr("time.sleep", lambda s: None)
+    assert send(["m1"], "TOKEN", "1") == (0, 1)
+    assert len(calls) == 1

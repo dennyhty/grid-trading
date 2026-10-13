@@ -62,8 +62,8 @@ function fmtTime(ms, withSec = true) {
   return `${g("year")}/${g("month")}/${g("day")} ${g("hour")}:${g("minute")}${withSec ? ":" + g("second") : ""}`;
 }
 function fmtShort(ms) { return fmtTime(ms, false).slice(5); }
-// 訊號和事件的 time 是那根 K 線的「開盤」時間；訊號要等收盤才成立，TP / 止損則發生在那根 K 線裡某個時刻。
-// 網頁顯示收盤時間（= 實際確認、推播的時間），免得看起來比 Telegram 早一根 K 線。
+// 訊號的 time 已經是訊號 K 線的「收盤」時間（= 確認、推播的時間），直接顯示；
+// TP / 止損事件的 time 是事件那根 K 線的「開盤」時間，事件發生在那根 K 線裡某個時刻，顯示成時間區間。
 const barMs = (iv) => (INTERVAL_SEC[iv] || 0) * 1000;
 const ivOfId = (id) => String(id).split("|")[1];
 const closeTime = (ms, iv) => ms + barMs(iv);
@@ -76,7 +76,7 @@ function eventTime(sid, kind, t) {
   const iv = ivOfId(sid);
   const n = ((state && state.notifications) || []).find((x) => x.id === `${sid}|${kind}|${t}`);
   if (n && !n.initial && n.created) return fmtTime(n.created, false);
-  return kind === "NEW" ? `${fmtTime(closeTime(t, iv), false)} 收盤確認` : `${barRange(t, iv)} 之間`;
+  return kind === "NEW" ? `${fmtTime(t, false)} 收盤確認` : `${barRange(t, iv)} 之間`;
 }
 function decimals(p) {
   if (!p) return 2;
@@ -307,7 +307,7 @@ function cardHtml(s) {
       <span class="pair">${nameHtml(s)}</span>
       <span class="chip">${s.label}</span>${tagChip(s)}${tested(s) ? "" : `<span class="chip warn-chip">未回測</span>`}
       <span class="status ${st.cls}">${st.text}</span></div>
-    <div class="meta">${esc(title)} · ${ago(closeTime(s.time, s.interval))} · 訊號價 ${fp(s.price)}</div>
+    <div class="meta">${esc(title)} · ${ago(s.time)} · 訊號價 ${fp(s.price)}</div>
     <div class="pnl"><div class="big num ${pnl >= 0 ? "up" : "down"}">${pct(pnl)}<small>${s.track.status === "OPEN" ? "未實現盈虧" : "已實現盈虧"}（1x）</small></div>
       <div class="right num">價格 ${pct(mv)}<br>現價 ${fp(price, s.price)}</div></div>
     ${ladderHtml(s, price)}
@@ -369,7 +369,7 @@ function renderDetailHead() {
   $("detail-head").innerHTML = `<div class="dh">
     <div class="row1"><span class="pair">${mk(s) === "crypto" ? pair(s.symbol) : nameHtml(s, true)}</span><span class="chip">${s.label}</span>${tagChip(s)}
       <span class="dir ${s.side === "LONG" ? "up" : "down"}">${s.side}</span></div>
-    <div class="muted">訊號時間 ${fmtTime(closeTime(s.time, s.interval))}（${s.label} K 線收盤確認）· UTC+8</div>
+    <div class="muted">訊號時間 ${fmtTime(s.time)}（${s.label} K 線收盤確認）· UTC+8</div>
     <div class="prices"><div><span class="muted">訊號價格</span><b class="num">${fp(s.price)}</b></div>
       <div><span class="muted">現價</span><b class="num ${priceMove(s, price) >= 0 ? "up" : "down"}">${fp(price, s.price)}</b></div></div>
     <details><summary>RSI 與策略資訊</summary><div class="kv num">
@@ -630,10 +630,13 @@ function setLive(on) {
 function lastSeen() { try { return Number(localStorage.getItem("lastSeenNote") || 0); } catch { return 0; } }
 function setLastSeen(v) { try { localStorage.setItem("lastSeenNote", String(v)); } catch { /* 私密模式 */ } }
 
+const isObserveNote = (n) => isObserve(String(n.signal_id).split("|")[2]);
+
 function handleNotifications() {
   const notes = state.notifications;
   const seen = lastSeen();
-  const unread = notes.filter((n) => !n.initial && n.created > seen).length;
+  // 觀察組（SMC、訂單流…）不推播，也不算進鈴鐺的未讀數
+  const unread = notes.filter((n) => !n.initial && !isObserveNote(n) && n.created > seen).length;
   $("badge").textContent = unread;
   $("badge").classList.toggle("hidden", unread === 0);
   if (notified === null) { notified = new Set(notes.map((n) => n.id)); return; }
@@ -641,8 +644,7 @@ function handleNotifications() {
     if (notified.has(n.id)) continue;
     notified.add(n.id);
     // 觀察組（SMC、訂單流…）只記錄在通知中心，不跳出通知
-    const observe = !!(state.strategies[n.signal_id.split("|")[2]] || {}).tag;
-    if (!n.initial && !observe && "Notification" in window && Notification.permission === "granted") {
+    if (!n.initial && !isObserveNote(n) && "Notification" in window && Notification.permission === "granted") {
       try { new Notification(KIND_TEXT[n.kind] || "訊號", { body: n.text, tag: n.id }); } catch { /* iOS 非安裝模式不支援 */ }
     }
   }

@@ -39,4 +39,10 @@ jobs:
             gh workflow run pages.yml --repo "$REPO" --ref "$BRANCH" || echo "觸發失敗，下一輪再試"
           done
       - name: 接力：開一個新的定時器
-        run: gh workflow run ticker.yml --repo "$REPO" --ref "$BRANCH"
+        run: |
+          # 接力失敗整條鏈就斷了（要手動重開），所以多試幾次
+          for i in 1 2 3 4 5; do
+            gh workflow run ticker.yml --repo "$REPO" --ref "$BRANCH" && exit 0
+            echo "接力失敗，30 秒後重試（第 $i 次）"; sleep 30
+          done
+          exit 1
