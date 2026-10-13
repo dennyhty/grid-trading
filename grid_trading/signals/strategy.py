@@ -26,6 +26,9 @@ class Signal:
     tps: list[float]     # TP1、TP2、TP3
     strategy: str
     info: dict = field(default_factory=dict)  # RSI、MACD 等，顯示在「RSI 與策略資訊」
+    # 出場方式（tracker 用）：portions 每個 TP 平幾成；trail 是 TP 都碰到後，剩下倉位的追蹤止損距離（價格）。
+    # 空的就是預設：TP1/2/3 各平 1/3、不追蹤
+    exit: dict = field(default_factory=dict)
 
     @property
     def direction(self) -> int:
@@ -58,6 +61,14 @@ class Strategy:
         """第 i 根收盤時是否觸發。觸發就回傳 (side, sl, [tp1, tp2, tp3], info)，否則 None。"""
         raise NotImplementedError
 
+    def exit_plan(self, interval: str) -> dict | None:
+        """（可選）某個週期要用不同的出場方式時回傳 {"tp_r": [...], "portions": [...], "trail_atr": k}。
+
+        tp_r 是各 TP 的 R 倍數（取代 check() 給的 TP），portions 是各 TP 平倉比例，trail_atr 是 TP 都碰到後
+        剩下倉位用幾倍 ATR（訊號 K 棒的 ATR）追蹤止損。None 表示照 check() 的 TP、各平 1/3。
+        """
+        return None
+
     def candidates(self, df: pd.DataFrame):
         """（可選）用向量運算先挑出可能觸發的 K 線，回傳布林陣列；只有 True 的那幾根才呼叫 check()。
 
@@ -78,8 +89,19 @@ class Strategy:
             if hit is None:
                 continue
             side, sl, tps, info = hit
-            out.append(Signal(symbol, interval, side, df["time"].iloc[i] + bar, float(df["close"].iloc[i]),
-                              float(sl), [float(t) for t in tps], self.name, info))
+            price = float(df["close"].iloc[i])
+            exit_ = {}
+            plan = self.exit_plan(interval)
+            if plan:
+                d = 1 if side == LONG else -1
+                risk = abs(price - float(sl))
+                tps = [price + d * k * risk for k in plan["tp_r"]]
+                exit_ = {"portions": list(plan["portions"])}
+                if plan.get("trail_atr"):
+                    exit_["trail"] = float(plan["trail_atr"] * info["atr"])
+                    exit_["trail_atr"] = plan["trail_atr"]
+            out.append(Signal(symbol, interval, side, df["time"].iloc[i] + bar, price,
+                              float(sl), [float(t) for t in tps], self.name, info, exit_))
         return out
 
 

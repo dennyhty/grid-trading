@@ -4,7 +4,12 @@
 - 進場：MACD 柱狀體由負翻正（多）或由正翻負（空），RSI 在 54~70（多）或 30~46（空），
   而且價格離通道不超過 max_ext_atr 倍 ATR（追太高不進）。
 - 停損：進場價 ∓ sl_atr 倍 ATR，風險記為 1R。
-- 停利：TP1/TP2/TP3 = 1R / 2R / 3R（倍數可調）。
+- 停利（2026-10-13 起依週期不同，見 EXIT_PLANS）：
+  - 4H：1R 平一半，TP1 後止損移到保本，剩下一半用 3 倍 ATR 追蹤止損（從進場後最高/最低價往回算）。
+  - 2H：TP 1R / 3R / 5R 各平 1/3，TP1 後止損移到保本、TP2 後移到 TP1。
+  - 其他週期：TP 1R / 2R / 3R 各平 1/3。
+  幣安 2020 年起回測（exit_backtest.py）：4H 每筆 +0.112R → +0.153R，2H +0.079R → +0.105R，
+  2020-23 和 2024 年後兩段都比較好，勝率仍約 55%。
 
 RSI 範圍在 2026-10-12 從 50~70 / 30~50 收緊成 54~70 / 30~46：幣安 2H、4H 回測裡，不論用 2020~2023 年
 挑、2024 年後驗證，或反過來，收緊後每筆期望值和 Sharpe 都比較好，被剔除的那段 RSI 平均約 0R。
@@ -23,9 +28,14 @@ class VegasTrend(Strategy):
     name = "vegas_trend"
     title = "維加斯通道順勢 + MACD/RSI"
     description = ("價格在 EMA144/169 通道上方且通道向上時只做多、下方向下時只做空；"
-                   "MACD 柱翻轉且 RSI 同向時進場。停損 ATR 倍數，TP 為 1R/2R/3R。")
+                   "MACD 柱翻轉且 RSI 同向時進場。停損 1.5 倍 ATR；4H 在 1R 平一半、其餘 3 ATR 追蹤止損，"
+                   "2H 的 TP 為 1R/3R/5R 各平 1/3。")
     chart_emas = {"EMA12": 12, "EMA144": 144, "EMA169": 169, "EMA576": 576, "EMA676": 676}
     min_bars = 200
+    EXIT_PLANS = {
+        "4H": {"tp_r": [1.0], "portions": [0.5], "trail_atr": 3.0},
+        "2H": {"tp_r": [1.0, 3.0, 5.0], "portions": [1 / 3, 1 / 3, 1 / 3]},
+    }
 
     def __init__(self, sl_atr: float = 1.5, tp_r: tuple[float, float, float] = (1.0, 2.0, 3.0),
                  max_ext_atr: float = 3.0, rsi_long: tuple[float, float] = (54, 70),
@@ -35,6 +45,9 @@ class VegasTrend(Strategy):
         self.max_ext_atr = max_ext_atr
         self.rsi_long = rsi_long
         self.rsi_short = rsi_short
+
+    def exit_plan(self, interval: str) -> dict | None:
+        return self.EXIT_PLANS.get(interval)
 
     def prepare(self, df: pd.DataFrame) -> pd.DataFrame:
         df = df.copy()
