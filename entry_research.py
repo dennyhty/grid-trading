@@ -3,6 +3,7 @@
 python entry_research.py --interval 4H [--source pionex] [--slip 0.0005]   第一步：訊號、特徵、實盤出場的 R
 python entry_research.py --interval 4H --analyze                         第二步：分組、過濾、挑選驗證、選幣
 python entry_research.py --interval 4H --timing                          進場時機：延遲、回踩掛單、等下一根確認
+python entry_research.py --interval 4H --delay                           收到訊號晚幾分鐘下單：0/1/2/3/5/10/15 分鐘（1 分鐘 K 線）
 
 需要 numba（和 stop_research.py 共用模擬程式）。
 
@@ -20,21 +21,24 @@ python entry_research.py --interval 4H --timing                          進場�
 - entry_quintiles_{週期}.csv、entry_filters_{週期}.csv、entry_selection_{週期}.csv、entry_model_{週期}.csv、
   entry_coins_{週期}.csv：第二步的結果。
 - entry_timing_{週期}.csv：進場時機。
+- entry_delay_{週期}.csv：晚幾分鐘下單（訊號收盤後的前 15 分鐘用幣安 1 分鐘 K 線，之後用 15 分鐘 K 線）。
 """
 
 from __future__ import annotations
 
 import argparse
+import io
 import json
 import sys
-from concurrent.futures import ProcessPoolExecutor
+import zipfile
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 
 from grid_trading import indicators as ind
-from grid_trading.binance_history import load
+from grid_trading.binance_history import FILES, binance_symbols, load
 from grid_trading.signals.strategy import LONG
 from grid_trading.signals.vegas_trend import VegasTrend
 from grid_trading.universe import TOP100
@@ -607,6 +611,185 @@ def timing(interval: str, fee: float, slip: float, workers: int, out: Path) -> p
     return t
 
 
+DELAYS = (0, 1, 2, 3, 5, 10, 15)  # 分鐘
+M1_DIR = Path("data/binance/m1")
+
+
+def _live_signals(coin: str, interval: str):
+    """實盤訊號（含 2H 的 ADX 規則）：(K 線, 訊號索引, 方向)。"""
+    p, strat = coin_frame(coin, interval, "binance")
+    if p is None:
+        return None, None, None
+    sigs = []
+    for i in np.flatnonzero(strat.candidates(p)):
+        if i < strat.min_bars or i + 2 >= len(p):
+            continue
+        hit_ = strat.check(p, int(i))
+        if hit_ is not None and strat.accept(p, int(i), interval):
+            sigs.append((int(i), 1 if hit_[0] == LONG else -1))
+    if not sigs:
+        return p, None, None
+    return p, np.array([q[0] for q in sigs]), np.array([q[1] for q in sigs])
+
+
+def _m1_day(coin: str, day: str) -> pd.DataFrame:
+    """某個幣某一天的幣安 1 分鐘 K 線（日檔），快取在 data/binance/m1/{幣}/{日期}.csv.gz。"""
+    path = M1_DIR / coin / f"{day}.csv.gz"
+    if path.exists():
+        return pd.read_csv(path)
+    import requests
+    for sym in reversed(binance_symbols(coin)):
+        key = f"data/futures/um/daily/klines/{sym}/1m/{sym}-1m-{day}.zip"
+        for _ in range(3):
+            try:
+                resp = requests.get(FILES + key, timeout=60)
+                break
+            except requests.RequestException:
+                resp = None
+        if resp is None or resp.status_code != 200:
+            continue
+        with zipfile.ZipFile(io.BytesIO(resp.content)) as z:
+            raw = z.read(z.namelist()[0]).decode()
+        df = pd.read_csv(io.StringIO(raw), header=None, usecols=range(5), names=["time", "open", "high", "low", "close"])
+        df = df[pd.to_numeric(df["time"], errors="coerce").notna()].astype(float)
+        df["time"] = df["time"].astype("int64")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        df.to_csv(path, index=False)
+        return df
+    return pd.DataFrame(columns=["time", "open", "high", "low", "close"])
+
+
+def _delay_coin(args):
+    """某個幣的實盤訊號，晚 0~15 分鐘下單各模擬一次。訊號收盤後前 15 分鐘的那根 15 分鐘 K 棒換成 15 根 1 分鐘 K 棒。"""
+    coin, interval, fee, slip = args
+    p, idx, ds = _live_signals(coin, interval)
+    if idx is None:
+        return None
+    sdf = load(coin, "15m")
+    if sdf.empty:
+        return None
+    pm = PARENT_MS[interval]
+    t15 = sdf["time"].to_numpy(dtype="datetime64[ms]").astype(np.int64)
+    pid_time = (t15 // pm) * pm
+    ptime = p["time"].to_numpy(dtype="datetime64[ms]").astype(np.int64)
+    keep = np.isin(pid_time, ptime)
+    sdf, t15, pid_time = sdf[keep].reset_index(drop=True), t15[keep], pid_time[keep]
+    pidx = np.searchsorted(ptime, pid_time)
+    is_close = np.r_[pid_time[1:] != pid_time[:-1], True]
+    first = np.searchsorted(pidx, np.arange(len(p)))
+    close_ms = ptime[idx] + pm  # 訊號 K 棒收盤
+    s0 = first[idx + 1]
+    ok = (s0 < len(t15)) & (t15[np.minimum(s0, len(t15) - 1)] == close_ms) & (s0 + 1 < len(t15))
+    ok &= t15[np.minimum(s0 + 1, len(t15) - 1)] == close_ms + 900_000
+    # 1 分鐘 K 線：收盤後 15 根都要有
+    windows = {}
+    for q in np.flatnonzero(ok):
+        day = pd.Timestamp(int(close_ms[q]), unit="ms", tz="UTC").strftime("%Y-%m-%d")
+        m1 = _m1_day(coin, day)
+        w = m1[(m1["time"] >= close_ms[q]) & (m1["time"] < close_ms[q] + 900_000)]
+        if len(w) == 15:
+            windows[q] = w
+    sel = np.array(sorted(windows), dtype=np.int64)
+    if len(sel) == 0:
+        return None
+    idx, ds, s0, close_ms = idx[sel], ds[sel], s0[sel], close_ms[sel]
+    # 把每個訊號收盤後的第一根 15 分鐘 K 棒換成 15 根 1 分鐘 K 棒（同一根被兩個訊號用到時只換一次）
+    cols = ("open", "high", "low", "close")
+    sub = {k: sdf[k].to_numpy(float) for k in cols}
+    rep = sorted(set(int(x) for x in s0))
+    by_pos = {int(s0[k]): windows[int(sel[k])] for k in range(len(sel))}
+    pieces = {k: [] for k in cols}
+    isc_p, last = [], 0
+    for pos in rep:
+        for k in cols:
+            pieces[k] += [sub[k][last:pos], by_pos[pos][k].to_numpy(float)]
+        isc_p += [is_close[last:pos], np.zeros(15, bool)]
+        last = pos + 1
+    for k in cols:
+        pieces[k].append(sub[k][last:])
+    isc_p.append(is_close[last:])
+    arr = {k: np.concatenate(pieces[k]) for k in cols}
+    arr["is_close"] = np.concatenate(isc_p)
+    rep_arr = np.array(rep)
+    block = s0 + 14 * np.searchsorted(rep_arr, s0)  # 這個訊號的第一根 1 分鐘 K 棒在新陣列的位置
+    atr = p["atr"].to_numpy(float)
+    arr["atr"] = atr
+    price0 = p["close"].to_numpy(float)[idx]
+    rows = []
+    for d in DELAYS:
+        st = block + d  # d = 15 時就是下一根 15 分鐘 K 棒
+        e = arr["open"][st]
+        for frame, ref in (("照訊號價格", price0), ("止損跟著成交價", None)):
+            filled = np.ones(len(idx), bool)
+            if ref is not None:  # 成交價已經在止損外就不進場
+                filled = ds * (e - (price0 - ds * LIVE_ATR * atr[idx])) > 0
+            ee = np.where(filled, e, price0)
+            res = simulate(arr, idx, ds, interval, fee, slip, entry=ee, starts=st, ref=ref)
+            for k_ in range(len(idx)):
+                rows.append({"coin": coin, "i": int(idx[k_]), "side": int(ds[k_]), "time": p["time"].iat[idx[k_] + 1],
+                             "delay": d, "frame": frame, "filled": bool(filled[k_]),
+                             "r": res["r"][k_] if filled[k_] else 0.0, "kind": int(res["kind"][k_]),
+                             "hit": int(res["hit"][k_]), "j_sub": int(res["j"][k_]), "risk_pct": res["risk_pct"][k_],
+                             "move_atr": ds[k_] * (e[k_] - price0[k_]) / atr[idx[k_]],
+                             "move_r": ds[k_] * (e[k_] - price0[k_]) / (LIVE_ATR * atr[idx[k_]])})
+    # 出場時間：換回原本的 K 棒序號（給帳戶模擬的「同一個幣同時一張」用）
+    newpid = np.concatenate([np.concatenate([pidx[(rep[n - 1] + 1) if n else 0:pos], np.full(15, pidx[pos])])
+                             for n, pos in enumerate(rep)] + [pidx[rep[-1] + 1:]])
+    for r_ in rows:
+        j = min(r_.pop("j_sub"), len(newpid) - 1)
+        r_["j"] = int(newpid[j])
+        r_["exit_t"] = p["time"].iat[min(r_["j"], len(p) - 1)]
+    return rows
+
+
+def delay(interval: str, fee: float, slip: float, workers: int, out: Path) -> pd.DataFrame:
+    coins = [c for c in TOP100 if c.isascii()]
+    # 先把要用的 1 分鐘日檔抓好（多執行緒），模擬時直接讀快取
+    need = []
+    for c in coins:
+        p, idx, _ = _live_signals(c, interval)
+        if idx is None:
+            continue
+        days = {t.strftime("%Y-%m-%d") for t in p["time"].iloc[idx + 1]}  # 訊號 K 棒收盤 = 下一根開盤
+        need += [(c, d) for d in sorted(days) if not (M1_DIR / c / f"{d}.csv.gz").exists()]
+    print(f"下載 {len(need)} 個 1 分鐘日檔", file=sys.stderr)
+    with ThreadPoolExecutor(16) as ex:
+        for n, _ in enumerate(ex.map(lambda cd: _m1_day(*cd), need)):
+            if n % 500 == 0:
+                print(n, file=sys.stderr)
+    rows = []
+    with ProcessPoolExecutor(workers) as ex:
+        for got in ex.map(_delay_coin, [(c, interval, fee, slip) for c in coins]):
+            rows += got or []
+    d = pd.DataFrame(rows)
+    d["time"] = pd.to_datetime(d["time"], utc=True)
+    d["exit_t"] = pd.to_datetime(d["exit_t"], utc=True)
+    tag = f"{interval}{'_slip' + str(slip) if slip else ''}"
+    d.to_csv(out / f"entry_delay_trades_{tag}.csv.gz", index=False)
+    res = []
+    for frame, gf in d.groupby("frame", sort=False):
+        base = gf[gf["delay"] == 0].set_index(["coin", "i"])["r"]
+        for dl, g in gf.groupby("delay"):
+            g = g.sort_values(["coin", "i"]).reset_index(drop=True)
+            k = cluster_key(g)
+            diff = g["r"].to_numpy() - base.reindex(pd.MultiIndex.from_frame(g[["coin", "i"]])).to_numpy()
+            for pn, pmask in periods(g["time"]).items():
+                fm = pmask & g["filled"].to_numpy() & (g["kind"] != -1).to_numpy()
+                acc = account(g.assign(live=True), fm)
+                dm = pmask & (g["kind"] != -1).to_numpy()
+                d_mean, d_se, d_cm, d_cse, _ = cluster_stats(diff[dm], k[dm])
+                res.append({"frame": frame, "delay": dl, "period": pn, "signals": int(pmask.sum()),
+                            "fill_rate": g["filled"].to_numpy()[pmask].mean(),
+                            "move_r": g["move_r"].to_numpy()[pmask].mean(),
+                            "per_signal_diff": d_mean, "per_signal_se": d_se, "per_signal_cluster_diff": d_cm,
+                            "per_signal_cluster_se": d_cse, **acc})
+    t = pd.DataFrame(res)
+    t.to_csv(out / f"entry_delay_{tag}.csv", index=False)
+    print(t[["frame", "delay", "period", "fill_rate", "move_r", "per_signal_diff", "per_signal_se", "trades", "exp_r",
+             "win_rate", "sharpe", "max_dd_pct"]].round(4).to_string())
+    return t
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--interval", default="4H", choices=["4H", "2H"])
@@ -617,6 +800,7 @@ def main() -> int:
     ap.add_argument("--out", default="output")
     ap.add_argument("--analyze", action="store_true")
     ap.add_argument("--timing", action="store_true")
+    ap.add_argument("--delay", action="store_true")
     args = ap.parse_args()
     out = Path(args.out)
     out.mkdir(exist_ok=True)
@@ -625,6 +809,8 @@ def main() -> int:
         analyze(args.interval, out, tag)
     elif args.timing:
         timing(args.interval, args.fee, args.slip, args.workers, out)
+    elif args.delay:
+        delay(args.interval, args.fee, args.slip, args.workers, out)
     else:
         build(args.interval, args.fee, args.slip, args.source, args.workers, out)
     return 0
