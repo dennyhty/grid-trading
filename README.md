@@ -76,6 +76,20 @@ RSI 原本是多單 50～70、空單 30～50，2026-10-12 改成多單 54～70�
 還沒結束、但已經超出 7 天顯示範圍的單，會用最新 K 線繼續追蹤到結束。讀不到上一份（不是 404）時不部署，免得紀錄被清空。
 網頁回測區下方顯示實盤紀錄。收緊前那段觀察期留下的 `strict_rsi` 標記還在紀錄裡，舊規則才會進的單不算進實盤成績。
 
+### 訂單流研究（還沒上線）
+
+主動買賣差（delta、CVD）、持倉量、多空比的策略回測，只用幣安的歷史（派網沒有這些資料）。
+策略在 `grid_trading/signals/orderflow.py`，沒有登記到網頁用的策略清單。
+
+```bash
+python -c "from grid_trading.binance_history import fetch_binance; from grid_trading.binance_metrics import fetch_metrics; \
+  from grid_trading.universe import TOP100; [fetch_binance(c, '1h', flow=True) and fetch_metrics(c, '2026-10-11') for c in TOP100]"
+python orderflow_backtest.py --tf 4h     # 112 組參數、正反向切分、隨機進場對照、過濾 vegas_trend
+python orderflow_oi_check.py --tf 4h     # 持倉量 × 價格的擴大參數表和「只看價格」對照
+```
+
+結論（2026-10-12）：沒有一個穩定贏過 4H vegas_trend；CVD 背離反向做每筆約 -0.1R。
+
 ### 加新策略
 
 在 `grid_trading/signals/` 新增一個檔案，繼承 `Strategy`、實作 `prepare()`（算指標）和 `check(df, i)`
