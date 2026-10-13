@@ -1,9 +1,11 @@
 """追蹤一個訊號之後的走勢：TP 觸及、保護止損移動、止損出場。回測和即時卡片共用。
 
-出場規則（固定，策略不用管）：
-- 在 TP1、TP2、TP3 各平 1/3。
+出場規則：
+- 預設在 TP1、TP2、TP3 各平 1/3；訊號的 exit["portions"] 可以改成別的比例和 TP 數量。
 - TP1 觸及後，剩餘倉位的止損移到 BE（進場價加上來回手續費，出場不賠錢）。
 - TP2 觸及後，止損再移到 TP1。
+- 所有 TP 都觸及後還有剩下的倉位（exit["trail"] 有設）：止損改成追蹤止損，
+  = 進場後最高價（做多）/最低價（做空）往回 trail 的距離，只會往有利方向移動。
 - 同一根 K 線同時碰到止損和 TP 時，保守假設先碰止損。
 - 超過 max_bars 根還沒結束，就用收盤價平掉剩下的倉位。
 """
@@ -21,7 +23,7 @@ PORTIONS = (1 / 3, 1 / 3, 1 / 3)
 
 @dataclass
 class Event:
-    kind: str      # TP1 / TP2 / TP3 / STOP_MOVED / SL / BE_EXIT / PROTECT_EXIT / TIMEOUT
+    kind: str      # TP1 / TP2 / TP3 / STOP_MOVED / TRAIL_MOVED / SL / BE_EXIT / PROTECT_EXIT / TRAIL_EXIT / TIMEOUT
     time: pd.Timestamp
     price: float
     text: str
@@ -41,11 +43,13 @@ class TrackResult:
     tps_hit: int = 0
     bars: int = 0
     be: float = 0.0
+    trailing: bool = False    # 剩下的倉位正在用追蹤止損
 
     def to_dict(self) -> dict:
         return {"status": self.status, "events": [e.to_dict() for e in self.events], "stop": self.stop,
                 "remaining": self.remaining, "realized_r": self.realized_r, "realized_pct": self.realized_pct,
-                "tps_hit": self.tps_hit, "bars": self.bars, "be": self.be}
+                "tps_hit": self.tps_hit, "bars": self.bars, "be": self.be,
+                "trailing": self.trailing}
 
 
 def breakeven(sig: Signal, fee: float) -> float:
@@ -58,6 +62,11 @@ def track(sig: Signal, candles: pd.DataFrame, fee: float = 0.0005, max_bars: int
     risk = abs(sig.price - sig.sl)
     be = breakeven(sig, fee)
     res = TrackResult(status="OPEN", stop=sig.sl, be=be)
+    plan = getattr(sig, "exit", None) or {}
+    portions = plan.get("portions") or PORTIONS
+    trail = plan.get("trail") or 0.0
+    extreme = sig.price
+    announced = None  # 上次通知的追蹤止損價；移動超過 trail/6（約 0.5 ATR）才再通知，免得每根 K 線都推播
     # 只取訊號後最多 max_bars 根，轉成 list 逐根跑（iterrows 很慢，回測時會被呼叫上千次）
     start = int(candles["time"].searchsorted(sig.time, side="left"))
     end = len(candles) if max_bars is None else min(len(candles), start + max_bars)
@@ -80,6 +89,8 @@ def track(sig: Signal, candles: pd.DataFrame, fee: float = 0.0005, max_bars: int
             price = res.stop
             if res.tps_hit == 0:
                 kind, text = "SL", f"止損出場 {_fmt(price)}"
+            elif res.trailing and price != be:
+                kind, text = "TRAIL_EXIT", f"追蹤止損出場 {_fmt(price)}"
             elif res.tps_hit == 1:
                 kind, text = "BE_EXIT", f"保本出場 {_fmt(price)}"
             else:
@@ -92,17 +103,28 @@ def track(sig: Signal, candles: pd.DataFrame, fee: float = 0.0005, max_bars: int
         while res.tps_hit < len(sig.tps) and d * (favorable - sig.tps[res.tps_hit]) >= 0:
             n = res.tps_hit
             tp = sig.tps[n]
-            close_part(PORTIONS[n], tp)
+            close_part(portions[n], tp)
             res.tps_hit += 1
             res.events.append(Event(f"TP{n + 1}", t, tp, f"TP{n + 1} 觸及 {_fmt(tp)}"))
             new_stop = be if n == 0 else (sig.tps[n - 1] if n == 1 else None)
             if new_stop is not None:
                 res.stop = new_stop
                 res.events.append(Event("STOP_MOVED", t, new_stop, f"保護止損設於 {_fmt(new_stop)}"))
-        if res.tps_hit == len(sig.tps):
+        if res.tps_hit == len(sig.tps) and (not trail or res.remaining <= 1e-9):
             res.remaining = 0.0
             res.status = "CLOSED"
             break
+        if trail and res.tps_hit == len(sig.tps):
+            # 剩下的倉位用追蹤止損：進場後最有利的價格往回 trail，不低於目前止損
+            res.trailing = True
+            if d * (favorable - extreme) > 0:
+                extreme = favorable
+            ts = extreme - d * trail
+            if d * (ts - res.stop) > 0:
+                res.stop = ts
+                if d * (ts - (announced if announced is not None else be)) >= trail / 6:
+                    announced = ts
+                    res.events.append(Event("TRAIL_MOVED", t, ts, f"追蹤止損移到 {_fmt(ts)}"))
         if res.bars >= max_bars:
             close_part(res.remaining, float(close))
             res.events.append(Event("TIMEOUT", t, float(close), f"超過 {max_bars} 根未結束，收盤平倉"))

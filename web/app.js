@@ -6,7 +6,21 @@ const TZ_SHIFT = 8 * 3600; // 圖表用 UTC+8 顯示
 const INTERVAL_SEC = { "15M": 900, "30M": 1800, "60M": 3600, "2H": 7200, "4H": 14400, "8H": 28800, "12H": 43200, "1D": 86400 };
 const LABEL = { "60M": "1H" };
 const KIND_TEXT = { TP1: "TP1 觸及", TP2: "TP2 觸及", TP3: "TP3 觸及", STOP_MOVED: "保護止損移動",
-  SL: "止損出場", BE_EXIT: "保本出場", PROTECT_EXIT: "保護止損出場", TIMEOUT: "逾時平倉", NEW: "新訊號" };
+  SL: "止損出場", BE_EXIT: "保本出場", PROTECT_EXIT: "保護止損出場", TRAIL_MOVED: "追蹤止損上移", TRAIL_EXIT: "追蹤止損出場", TIMEOUT: "逾時平倉", NEW: "新訊號" };
+
+/** 出場規則的文字。訊號的 exit 沒寫就是舊的預設：TP1/2/3 各平 1/3。 */
+function exitRuleText(s) {
+  const e = s.exit || {};
+  const n = s.tps.length;
+  const parts = (e.portions || [1 / 3, 1 / 3, 1 / 3]).slice(0, n);
+  const fr = (p) => Math.abs(p - 0.5) < 1e-6 ? "一半" : Math.abs(p - 1 / 3) < 1e-6 ? "1/3" : `${Math.round(p * 100)}%`;
+  const risk = Math.abs(s.price - s.sl);
+  const rs = s.tps.map((t) => `${+(Math.abs(t - s.price) / risk).toFixed(2)}R`);
+  let text = s.tps.map((_, k) => `TP${k + 1}（${rs[k]}）平${fr(parts[k])}`).join("、") + "；TP1 後止損移到 BE";
+  if (n >= 3) text += "，TP2 後移到 TP1";
+  if (e.trail) text += `；剩下的倉位用追蹤止損：進場後最${dir(s) > 0 ? "高" : "低"}價往回 ${e.trail_atr || ""} 倍 ATR（${fp(e.trail, s.price)}，約 ${(e.trail / s.price * 100).toFixed(2)}%）`;
+  return text;
+}
 
 let state = null;
 let tab = "OPEN";
@@ -261,11 +275,9 @@ function renderStats() {
 function ladderHtml(s, price) {
   const t = s.track, d = dir(s);
   const kinds = new Set(t.events.map((e) => e.kind));
-  const rows = [
-    ["TP3", s.tps[2], kinds.has("TP3"), "tp"], ["TP2", s.tps[1], kinds.has("TP2"), "tp"],
-    ["TP1", s.tps[0], kinds.has("TP1"), "tp"], ["BE", t.be, kinds.has("BE_EXIT"), "be"],
-    ["進場", s.price, true, "entry"], ["SL", s.sl, kinds.has("SL"), "sl"],
-  ];
+  const rows = s.tps.map((p, k) => [`TP${k + 1}`, p, kinds.has(`TP${k + 1}`), "tp"]).reverse();
+  if (t.trailing) rows.unshift(["追蹤止損", t.stop, kinds.has("TRAIL_EXIT"), "be"]);
+  rows.push(["BE", t.be, kinds.has("BE_EXIT"), "be"], ["進場", s.price, true, "entry"], ["SL", s.sl, kinds.has("SL"), "sl"]);
   return `<div class="ladder">${rows.map(([name, p, hit, cls]) => {
     const dist = d * (p - s.price) / s.price * 100;
     return `<div class="lv ${cls} ${hit && cls !== "entry" ? "hit" : ""}">
@@ -351,7 +363,8 @@ function renderList() {
   $("n-closed").textContent = closed.length;
   const shown = tab === "OPEN" ? open : closed;
   $("cards").innerHTML = shown.map(cardHtml).join("") ||
-    `<div class="empty">${ivFilter === "ALL" ? "" : lbl(ivFilter) + " "}${tab === "OPEN" ? "目前沒有進行中的訊號" : "最近沒有已結束的訊號"}${hiddenNote(inMarket)}</div>`;
+    `<div class="empty">${ivFilter === "ALL" ? "" : lbl(ivFilter) + " "}${tab === "OPEN" ? "目前沒有進行中的訊號" : "最近沒有已結束的訊號"}${
+      tab === "OPEN" && closed.length ? `<br><small>最近 ${state.keep_days || 7} 天有 ${closed.length} 筆已經結束，點「已結束」查看</small>` : ""}${hiddenNote(inMarket)}</div>`;
   const counts = state.markets ? Object.entries(state.markets).map(([m, v]) => `${v.label} ${v.symbols}`).join("、") : `${state.symbols} 個`;
   $("foot").textContent = `監看 ${counts} · 週期 ${state.intervals.join("/")} · ` +
     `最後掃描 ${state.updated ? fmtTime(state.updated) : "—"}` +
@@ -384,7 +397,8 @@ function renderDetailHead() {
       ${a ? `<span>回測勝率</span><span>${(a.win_rate * 100).toFixed(1)}%（${a.trades} 筆）</span>
       <span>回測期望值</span><span>${a.expectancy_r.toFixed(3)}R / 筆</span>`
         : `<span>回測</span><span>這類標的尚未回測，結果未知</span>`}
-      <span>出場規則</span><span>TP1/2/3 各平 1/3；TP1 後止損移到 BE，TP2 後移到 TP1</span>
+      <span>出場規則</span><span>${esc(exitRuleText(s))}</span>
+      ${s.track.trailing && s.track.status === "OPEN" ? `<span>目前追蹤止損</span><span>${fp(s.track.stop, s.price)}（派網的止損單要跟著改到這裡）</span>` : ""}
     </div></details>
     <div class="muted">現價更新 ${fmtTime(Date.now())} · 資訊每 30 秒更新</div></div>`;
 }
@@ -601,8 +615,8 @@ function drawLevels() {
   if (!$("opt-levels").checked) return;
   const s = current;
   const lines = [["進場", s.price, "#e6e8ee", 0], ["SL", s.sl, "#f0697a", 2],
-    ["TP1", s.tps[0], "#22c58b", 2], ["TP2", s.tps[1], "#22c58b", 2], ["TP3", s.tps[2], "#22c58b", 2]];
-  if (s.track.stop !== s.sl) lines.push(["保護止損", s.track.stop, "#d9b45a", 1]);
+    ...s.tps.map((p, k) => [`TP${k + 1}`, p, "#22c58b", 2])];
+  if (s.track.stop !== s.sl) lines.push([s.track.trailing ? "追蹤止損" : "保護止損", s.track.stop, "#d9b45a", 1]);
   for (const [title, price, color, style] of lines) {
     priceLines.push(candleSeries.createPriceLine({ price, color, lineWidth: 1, lineStyle: style, axisLabelVisible: true, title }));
   }
