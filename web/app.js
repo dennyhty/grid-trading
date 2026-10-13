@@ -163,7 +163,9 @@ function liveHtml(name, iv, bt) {
 function compactStats() {
   const rows = [];
   for (const [name, st] of Object.entries(state.strategies)) {
+    if (st.markets && !st.markets.includes(market)) continue;
     for (const iv of state.intervals.map(ivOf)) {
+      if (st.intervals && !st.intervals.map(ivOf).includes(iv)) continue;
       const s = statsFor(name, market, iv);
       const a = (s && s.all) || {};
       const g = ((state.ledger || {}).groups || {})[`${name}|${market}|${iv}`];
