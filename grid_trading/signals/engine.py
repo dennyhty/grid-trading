@@ -28,21 +28,39 @@ def label(interval: str) -> str:
     return LABEL.get(interval, interval)
 
 
+def _get_retry(api: PionexPublic, path: str, params: dict, tries: int = 4) -> dict | None:
+    """派網偶爾回錯（例如請求太密被限流），等一下再試；試完還是失敗就回傳 None。"""
+    for i in range(tries):
+        try:
+            return api._get(path, params)
+        except Exception:
+            if i < tries - 1:
+                time.sleep(1.5 * 2 ** i)
+    return None
+
+
 def fetch_klines(api: PionexPublic, symbol: str, interval: str, bars: int = 1000) -> pd.DataFrame:
-    """抓最近 bars 根 K 線（每次最多 500，往回翻頁）。最後一根可能還沒收盤。"""
+    """抓最近 bars 根 K 線（每次最多 500，往回翻頁）。最後一根可能還沒收盤。
+
+    重試後還是抓不到時，回傳已抓到的部分，並在 df.attrs["incomplete"] 標記 True，
+    讓呼叫的人分得出「這個幣歷史本來就短」和「這次沒抓到」。
+    """
     if interval in SYNTHETIC:
         base, k = SYNTHETIC[interval]
-        df = fetch_klines(api, symbol, base, bars * k)
-        return resample(df, f"{INTERVAL_MS[interval] // 3_600_000}h", origin="epoch") if len(df) else df
+        raw = fetch_klines(api, symbol, base, bars * k)
+        df = resample(raw, f"{INTERVAL_MS[interval] // 3_600_000}h", origin="epoch") if len(raw) else raw
+        df.attrs["incomplete"] = raw.attrs.get("incomplete", False)
+        return df
     frames = []
     end = None
+    incomplete = False
     while bars > 0:
         params = {"symbol": symbol, "interval": interval, "limit": min(500, bars)}
         if end is not None:
             params["endTime"] = end
-        try:
-            data = api._get("/api/v1/market/klines", params)
-        except Exception:
+        data = _get_retry(api, "/api/v1/market/klines", params)
+        if data is None:
+            incomplete = True
             break
         batch = pd.DataFrame(data.get("klines", []))
         if batch.empty:
@@ -53,12 +71,16 @@ def fetch_klines(api: PionexPublic, symbol: str, interval: str, bars: int = 1000
             break
         end = int(batch["time"].min()) - 1
     if not frames:
-        return pd.DataFrame(columns=["time", "open", "high", "low", "close", "volume"])
+        df = pd.DataFrame(columns=["time", "open", "high", "low", "close", "volume"])
+        df.attrs["incomplete"] = incomplete
+        return df
     df = pd.concat(frames).drop_duplicates("time")
     for col in ("open", "high", "low", "close", "volume"):
         df[col] = pd.to_numeric(df[col], errors="coerce")
     df["time"] = pd.to_datetime(df["time"], unit="ms", utc=True)
-    return df.sort_values("time").reset_index(drop=True)
+    df = df.sort_values("time").reset_index(drop=True)
+    df.attrs["incomplete"] = incomplete
+    return df
 
 
 class Engine:
@@ -68,6 +90,7 @@ class Engine:
         self.api = PionexPublic(pause=0.1)
         self.workers = workers  # 同時抓幾個 K 線（每條執行緒各用自己的連線）
         self._local = threading.local()
+        self.failed: list[tuple[str, str]] = []
         self.strategies = {s.name: s for s in strategies}
         self.symbols = symbols
         self.intervals = intervals
@@ -132,6 +155,8 @@ class Engine:
         now = pd.Timestamp.now(tz="UTC")
         found: dict[str, dict] = {}
         frames = self.klines_many([(sym, iv) for iv in self.intervals for sym in self.symbols])
+        # 重試後還是沒抓完整的（幣, 週期）；這些幣這次掃不到訊號，網頁版會因此不更新網站
+        self.failed = sorted(k for k, df in frames.items() if df.attrs.get("incomplete"))
         for interval in self.intervals:
             bar = pd.Timedelta(milliseconds=INTERVAL_MS[interval])
             for sym in self.symbols:

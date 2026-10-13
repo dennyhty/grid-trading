@@ -44,3 +44,25 @@ def test_2h_klines_are_built_from_1h():
     assert len(df) == 3
     assert list(df["open"]) == [0, 2, 4] and list(df["close"]) == [1.5, 3.5, 5.5]
     assert list(df["high"]) == [2, 4, 6] and (df["time"].diff().dropna() == pd.Timedelta(hours=2)).all()
+
+
+def test_fetch_retries_then_marks_incomplete(monkeypatch):
+    import grid_trading.signals.engine as eng_mod
+    monkeypatch.setattr(eng_mod.time, "sleep", lambda s: None)
+
+    class Flaky:
+        def __init__(self, fail_first):
+            self.calls = 0
+            self.fail_first = fail_first
+
+        def _get(self, path, params):
+            self.calls += 1
+            if self.calls <= self.fail_first:
+                raise RuntimeError("429")
+            return {"klines": [{"time": 1_700_000_000_000 + i * 3_600_000, "open": 1, "high": 1, "low": 1,
+                                "close": 1, "volume": 1} for i in range(10)]}
+
+    ok = fetch_klines(Flaky(2), "BTC_USDT_PERP", "60M", 10)
+    assert len(ok) == 10 and not ok.attrs["incomplete"]
+    bad = fetch_klines(Flaky(99), "BTC_USDT_PERP", "2H", 10)
+    assert len(bad) == 0 and bad.attrs["incomplete"]
