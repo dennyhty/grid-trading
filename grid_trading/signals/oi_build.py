@@ -11,6 +11,10 @@
 
 回測見專案的 report_orderflow_20261012.md：逐筆 2024 年後 +0.09R，但同一天同方向算一注時只剩 +0.03R，
 還不能當成已驗證的策略，所以只當觀察組、不推播。
+
+2026-10-13 起也跑美股和商品（Denny 要求，觀察組）：幣安有這些標的的 USDT 永續（股票代號不帶 X，例如 NVDAX → NVDAUSDT），
+持倉量一樣從幣安抓；幣安沒有的（WTI、布蘭特、USOX…）不出訊號。STXX（希捷）和幣安的 STX（Stacks 幣）撞名，不跑。
+美股、商品另外有 2H 版本（OiBuild2H）。幣安這些合約大多 2026 年才上市，回測樣本很小。
 """
 
 from __future__ import annotations
@@ -18,8 +22,20 @@ from __future__ import annotations
 import pandas as pd
 
 from ..binance_live import attach_open_interest, fetch_open_interest
+from ..markets import STOCK, classify
 from .orderflow import OpenInterestPrice
 from .strategy import LONG, register
+
+# 派網代號對到幣安時會撞到別的東西的，直接不跑
+NO_BINANCE = {"STXX"}
+
+
+def binance_coin(symbol: str) -> str | None:
+    """派網合約 → 幣安的幣名（binance_symbols 用）。美股去掉結尾的 X；撞名的回 None。"""
+    base = symbol.split("_")[0]
+    if base in NO_BINANCE:
+        return None
+    return base[:-1] if classify(symbol) == STOCK else base
 
 
 @register
@@ -30,7 +46,7 @@ class OiBuild(OpenInterestPrice):
                    "持倉量用幣安的資料。停損 1.5 ATR，TP 為 1R/2R/3R。")
     tag = "訂單流觀察組"
     intervals = ("4H",)
-    markets = ("crypto",)
+    markets = ("crypto", "stock", "commodity")
     chart_emas = {"EMA144": 144, "EMA169": 169}
 
     def __init__(self, n: int = 6, k: float = 2.0, **kw):
@@ -38,7 +54,10 @@ class OiBuild(OpenInterestPrice):
 
     def scan(self, df: pd.DataFrame, symbol: str, interval: str, start: int | None = None):
         if "oi" not in df:  # 即時掃描：派網 K 線沒有持倉量，接上幣安的
-            oi = fetch_open_interest(symbol.split("_")[0], interval)
+            coin = binance_coin(symbol)
+            if coin is None:
+                return []
+            oi = fetch_open_interest(coin, interval)
             if oi.empty:
                 return []
             df = attach_open_interest(df, oi, interval)
@@ -60,3 +79,13 @@ class OiBuild(OpenInterestPrice):
         ]
         return side, sl, tps, info
 
+
+
+@register
+class OiBuild2H(OiBuild):
+    """同一套規則跑在 2H（過去 6 根 = 12 小時），只給美股和商品當觀察組。"""
+    name = "oi_build_2h"
+    title = "價漲倉增 2H（訂單流觀察組）"
+    description = OiBuild.description.replace("24 小時", "12 小時")
+    intervals = ("2H",)
+    markets = ("stock", "commodity")
