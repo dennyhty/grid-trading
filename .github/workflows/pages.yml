@@ -39,6 +39,11 @@ jobs:
           owner="${GITHUB_REPOSITORY%/*}"; repo="${GITHUB_REPOSITORY#*/}"
           curl -fsS "https://${owner}.github.io/${repo}/data/notifications.json" -o previous_notifications.json \
             || echo "[]" > previous_notifications.json
+      - name: 取得上一次的訊號（這次 K 線沒抓到的幣沿用）
+        run: |
+          owner="${GITHUB_REPOSITORY%/*}"; repo="${GITHUB_REPOSITORY#*/}"
+          curl -fsS "https://${owner}.github.io/${repo}/data/state.json" -o previous_state.json \
+            || echo "{}" > previous_state.json
       - name: 取得上一次的實盤紀錄（拿不到就不部署，免得紀錄被清空）
         run: |
           owner="${GITHUB_REPOSITORY%/*}"; repo="${GITHUB_REPOSITORY#*/}"
@@ -46,7 +51,7 @@ jobs:
           if [ "$code" = "404" ]; then echo "[]" > previous_ledger.json
           elif [ "$code" != "200" ]; then echo "讀取 ledger.json 失敗：HTTP $code"; exit 1; fi
       - name: 掃描訊號、產生網站
-        run: python signal_snapshot.py --out site --previous previous_notifications.json --ledger previous_ledger.json
+        run: python signal_snapshot.py --out site --previous previous_notifications.json --ledger previous_ledger.json --previous-state previous_state.json
       - name: 整理要推到 Telegram 的新通知
         run: python signal_telegram.py outbox site/data previous_notifications.json outbox.json
       - uses: actions/upload-pages-artifact@v3

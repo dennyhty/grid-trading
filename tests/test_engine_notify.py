@@ -66,3 +66,18 @@ def test_fetch_retries_then_marks_incomplete(monkeypatch):
     assert len(ok) == 10 and not ok.attrs["incomplete"]
     bad = fetch_klines(Flaky(99), "BTC_USDT_PERP", "2H", 10)
     assert len(bad) == 0 and bad.attrs["incomplete"]
+
+
+def test_failed_fetch_keeps_previous_signals(tmp_path, monkeypatch):
+    import pandas as pd
+
+    eng = Engine([], ["BTC_USDT_PERP"], ["2H"], state_dir=tmp_path)
+    now = int(time.time() * 1000)
+    sid, old = _sig(now - 5 * 3_600_000)
+    eng.previous = {sid: old}
+    bad = pd.DataFrame(columns=["time", "open", "high", "low", "close", "volume"])
+    bad.attrs.update(incomplete=True, error="HTTPError: 429")
+    monkeypatch.setattr(eng, "klines_many", lambda jobs, bars=1000: {j: bad for j in jobs})
+    eng.scan_once()
+    assert eng.failed == [("BTC_USDT_PERP", "2H")] and eng.carried == 1
+    assert sid in eng.signals

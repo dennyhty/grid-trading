@@ -13,15 +13,31 @@ let tab = "OPEN";
 let market = (() => { try { return localStorage.getItem("market") || "crypto"; } catch { return "crypto"; } })();
 // 週期篩選：ALL 或 state.intervals 裡的一個（"4H"、"2H"）
 let ivFilter = (() => { try { return localStorage.getItem("iv") || "ALL"; } catch { return "ALL"; } })();
+// 策略 / 觀察組：策略有 tag（例如「SMC觀察組」「訂單流觀察組」）就算觀察組，沒有 tag 的是正式策略
+let group = (() => { try { return localStorage.getItem("group") || "strategy"; } catch { return "strategy"; } })();
+const isObserve = (name) => !!(state.strategies[name] || {}).tag;
+const inGroup = (name) => isObserve(name) === (group === "observe");
 const ivOf = (label) => (label === "1H" ? "60M" : label);
 /** 週期篩選列。瀏覽器快取了舊版 index.html 時沒有這個元素，就自己補在市場分頁下面，免得整頁的程式停住。 */
+/** 策略 / 觀察組 切換列（放在市場分頁下面；舊版 index.html 沒有，所以由程式建立）。 */
+function groupTabsEl() {
+  let el = document.getElementById("grouptabs");
+  if (!el) {
+    el = document.createElement("div");
+    el.id = "grouptabs";
+    el.className = "tabs ivtabs hidden";
+    const row = document.querySelector(".mtabs-row");
+    if (row) row.after(el); else document.body.prepend(el);
+  }
+  return el;
+}
 function ivTabsEl() {
   let el = document.getElementById("ivtabs");
   if (!el) {
     el = document.createElement("div");
     el.id = "ivtabs";
     el.className = "tabs ivtabs hidden";
-    const row = document.querySelector(".mtabs-row");
+    const row = document.getElementById("grouptabs") || document.querySelector(".mtabs-row");
     if (row) row.after(el); else document.body.prepend(el);
   }
   return el;
@@ -163,6 +179,7 @@ function liveHtml(name, iv, bt) {
 function compactStats() {
   const rows = [];
   for (const [name, st] of Object.entries(state.strategies)) {
+    if (!inGroup(name)) continue;
     if (st.markets && !st.markets.includes(market)) continue;
     for (const iv of state.intervals.map(ivOf)) {
       if (st.intervals && !st.intervals.map(ivOf).includes(iv)) continue;
@@ -184,6 +201,7 @@ function renderStats() {
   if (ivFilter === "ALL" && state.intervals.length > 1) { $("stats").innerHTML = compactStats(); return; }
   const parts = [];
   for (const [name, st] of Object.entries(state.strategies)) {
+    if (!inGroup(name)) continue;
     if (st.markets && !st.markets.includes(market)) continue;
     for (const iv of state.intervals.map(ivOf).filter((x) => ivFilter === "ALL" || x === ivFilter)) {
       if (st.intervals && !st.intervals.map(ivOf).includes(iv)) continue;
@@ -289,13 +307,20 @@ function hiddenNote(inMarket) {
 
 function renderList() {
   if (ivFilter !== "ALL" && !state.intervals.map(ivOf).includes(ivFilter)) ivFilter = "ALL";
+  const hasObserve = Object.keys(state.strategies).some(isObserve);
+  if (!hasObserve) group = "strategy";
+  const openIn = (g, m) => state.signals.filter((s) => isObserve(s.strategy) === (g === "observe") && mk(s) === m
+    && s.track.status === "OPEN").length;
+  groupTabsEl().classList.toggle("hidden", !hasObserve);
+  groupTabsEl().innerHTML = [["strategy", "策略"], ["observe", "觀察組"]].map(([g, name]) =>
+    `<button class="ivtab grouptab ${g === group ? "active" : ""}" data-group="${g}">${name} <span>${openIn(g, market) || ""}</span></button>`).join("");
   renderStats();
   document.querySelectorAll(".mtab").forEach((b) => {
     const m = b.dataset.market;
     b.classList.toggle("active", m === market);
-    b.querySelector("span").textContent = state.signals.filter((s) => mk(s) === m && s.track.status === "OPEN").length || "";
+    b.querySelector("span").textContent = openIn(group, m) || "";
   });
-  const inMarket = state.signals.filter((s) => mk(s) === market);
+  const inMarket = state.signals.filter((s) => mk(s) === market && inGroup(s.strategy));
   const ivs = state.intervals.map(ivOf);
   ivTabsEl().classList.toggle("hidden", ivs.length < 2);
   ivTabsEl().innerHTML = ["ALL", ...ivs].map((iv) => {
@@ -547,6 +572,13 @@ document.querySelectorAll(".tab").forEach((b) => b.addEventListener("click", () 
   document.querySelectorAll(".tab").forEach((x) => x.classList.toggle("active", x === b));
   renderList();
 }));
+groupTabsEl().addEventListener("click", (e) => {
+  const b = e.target.closest(".grouptab");
+  if (!b) return;
+  group = b.dataset.group;
+  try { localStorage.setItem("group", group); } catch { /* 私密模式 */ }
+  renderList();
+});
 ivTabsEl().addEventListener("click", (e) => {
   const b = e.target.closest(".ivtab");
   if (!b) return;
