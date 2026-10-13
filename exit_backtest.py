@@ -5,7 +5,7 @@ python exit_backtest.py --interval 4H [--fee 0.0005]
 需要另外 pip install numba（只有這支研究程式用到，網站不需要）。
 
 訊號本身不變（和實盤同一套 vegas_trend 進場條件），只換出場方式：
-- 止損：ATR 倍數、訊號 K 棒最低/最高價（可加緩衝或最小距離）、前 N 根最低/最高價。
+- 止損：ATR 倍數、訊號 K 棒或前一根 K 棒的最低/最高價（可加緩衝或最小距離）、前 N 根最低/最高價。
 - 止盈：TP 的 R 倍數、各段平倉比例、保護止損怎麼移、最後一段改成追蹤止損。
 
 每種組合都照回測的規則跑：同一個幣同時只持有一張單、同一根 K 棒同時碰到止損和 TP 時先算止損、
@@ -49,6 +49,10 @@ STOPS = [
     ("K棒極值+0.5ATR", "candle", 0.5),
     ("K棒極值(至少1ATR)", "candle_floor", 1.0),
     ("K棒極值(至少1.5ATR)", "candle_floor", 1.5),
+    ("前一根極值", "prev", 0.0),
+    ("前一根極值+0.2ATR", "prev", 0.2),
+    ("前一根極值(至少1.5ATR)", "prev_floor", 1.5),
+    ("訊號和前一根極值", "swing", 2),
     ("前3根極值", "swing", 3),
     ("前5根極值", "swing", 5),
     ("前10根極值", "swing", 10),
@@ -128,6 +132,10 @@ def stop_distance(kind: str, arg: float, d: int, price: float, atr: float, hi: f
         dist = (price - lo if d > 0 else hi - price) + arg * atr
     elif kind == "candle_floor":
         dist = max(price - lo if d > 0 else hi - price, arg * atr)
+    elif kind == "prev":  # 訊號前一根 K 棒的最低（多）/最高（空）價
+        dist = (price - swing_lo[-1] if d > 0 else swing_hi[-1] - price) + arg * atr
+    elif kind == "prev_floor":
+        dist = max(price - swing_lo[-1] if d > 0 else swing_hi[-1] - price, arg * atr)
     else:
         dist = price - swing_lo[int(arg)] if d > 0 else swing_hi[int(arg)] - price
     return max(dist, MIN_STOP_PCT * price)
@@ -157,8 +165,9 @@ def coin_signals(coin: str, interval: str) -> dict | None:
         if hit is not None:
             sigs.append((int(i), 1 if hit[0] == LONG else -1))
     swings = {}
-    for n in (3, 5, 10):
+    for n in (2, 3, 5, 10):
         swings[n] = (p["high"].rolling(n).max().to_numpy(), p["low"].rolling(n).min().to_numpy())
+    swings[-1] = (p["high"].shift(1).to_numpy(), p["low"].shift(1).to_numpy())
     return {"coin": coin, "time": p["time"].to_numpy(), "high": p["high"].to_numpy(float),
             "low": p["low"].to_numpy(float), "close": p["close"].to_numpy(float), "atr": p["atr"].to_numpy(float),
             "sigs": sigs, "swings": swings}
@@ -179,8 +188,8 @@ def run_variant(data: dict, stop: tuple, exit_: tuple, fee: float, idx_list=None
         if i + 1 >= len(h) or not np.isfinite(a[i]):
             continue
         price = c[i]
-        sw_hi = {n: data["swings"][n][0][i] for n in (3, 5, 10)}
-        sw_lo = {n: data["swings"][n][1][i] for n in (3, 5, 10)}
+        sw_hi = {n: v[0][i] for n, v in data["swings"].items()}
+        sw_lo = {n: v[1][i] for n, v in data["swings"].items()}
         risk = stop_distance(kind, arg, d, price, a[i], h[i], l[i], sw_hi, sw_lo)
         tps = np.array([price + d * k * risk for k in tp_r], dtype=float)
         r, hit, j, done = track(h, l, c, i + 1, d, price, risk, tps, port, protect, trail, a[i], fee, MAX_BARS)
@@ -268,7 +277,7 @@ def main() -> int:
             continue
         tr["time"] = pd.to_datetime(tr["time"], utc=True)
         tr["exit_time"] = pd.to_datetime(tr["exit_time"], utc=True)
-        if sname in ("ATR1.5", "K棒極值", "K棒極值+0.2ATR") and ename == EXITS[0][0]:
+        if sname in ("ATR1.5", "K棒極值", "K棒極值+0.2ATR", "前一根極值") and ename == EXITS[0][0]:
             trades_out[sname] = tr
         for pname, sub in periods(tr).items():
             rows.append({"stop": sname, "exit": ename, "period": pname, **summarize(sub)})
