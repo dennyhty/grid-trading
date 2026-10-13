@@ -217,7 +217,7 @@ class Engine:
                             busy_until = now + bar
                             continue
                         sig = Signal(sym, interval, old["side"], t0, old["price"], old["sl"], list(old["tps"]),
-                                     strat.name, old.get("info") or {})
+                                     strat.name, old.get("info") or {}, old.get("exit") or {})
                         res = track(sig, df, self.fee)
                         found[old["id"]] = {**old, "track": res.to_dict()}
                         busy_until = res.events[-1].time if res.status == "CLOSED" else now + bar
@@ -243,6 +243,10 @@ class Engine:
         now = time.time() * 1000
         # 已經寫過的通知（同一個 id 可能出現兩次：TP1、TP2 在同一根 K 線觸及時，會有兩個同時間的 STOP_MOVED）
         have = Counter(n["id"] for n in self.notifications)
+        latest: dict[str, int] = {}  # 每個訊號已通知過的最新事件時間
+        for n in self.notifications:
+            if n["kind"] != "NEW":
+                latest[n["signal_id"]] = max(latest.get(n["signal_id"], 0), n["time"])
         for sid, s in found.items():
             old = self.signals.get(sid)
             pair = s["name"] if s["market"] != "crypto" else s["symbol"].replace("_USDT_PERP", "/USDT")
@@ -263,7 +267,9 @@ class Engine:
                 count[nid] += 1
                 if count[nid] > have[nid]:
                     have[nid] += 1
-                    self._push(sid, e["kind"], e["time"], f"{pair} {s['label']} {side}：{e['text']}", quiet)
+                    # 比已通知的事件還早：是出場規則改了、重新追蹤補出來的舊事件，只記錄不推播
+                    late = e["time"] < latest.get(sid, 0)
+                    self._push(sid, e["kind"], e["time"], f"{pair} {s['label']} {side}：{e['text']}", quiet or late)
         # 只保留最近 300 則，但網站上還在的訊號，它的通知全部留著（不然下次會當成沒通知過）
         cut = len(self.notifications) - 300
         self.notifications = [n for i, n in enumerate(self.notifications) if i >= cut or n["signal_id"] in found]

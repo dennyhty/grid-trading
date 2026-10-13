@@ -108,6 +108,12 @@ def test_events_are_matched_by_id_not_by_position(tmp_path):
     sl = [n for n in eng.notifications if n["signal_id"] == sid and n["kind"] == "SL"]
     assert len(sl) == 1 and sl[0]["initial"] is False
 
+    # 改規則後補出來、比已通知事件還早的事件：記錄但不推播
+    s["track"]["events"].insert(1, {"kind": "TRAIL_MOVED", "time": t + 60_000, "text": "追蹤止損移到 103"})
+    eng._notify({sid: s})
+    trail = [n for n in eng.notifications if n["signal_id"] == sid and n["kind"] == "TRAIL_MOVED"]
+    assert len(trail) == 1 and trail[0]["initial"] is True
+
 
 def test_trim_keeps_notifications_of_signals_still_on_the_site(tmp_path):
     eng = Engine([], [], ["4H"], state_dir=tmp_path)
