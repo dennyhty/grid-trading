@@ -20,6 +20,8 @@ FIELDS = ("id", "symbol", "interval", "strategy", "market", "side", "time", "pri
 def entry_from(sig: dict) -> dict:
     t = sig["track"]
     e = {k: sig[k] for k in FIELDS}
+    if sig.get("exit"):
+        e["exit_plan"] = sig["exit"]  # 出場方式（2026-10-13 起 4H/2H 不同）；舊紀錄沒有就是各平 1/3
     e["strict_rsi"] = (sig.get("info") or {}).get("strict_rsi")
     e.update(_result(t))
     return e
@@ -51,7 +53,7 @@ def update(ledger: list[dict], signals: list[dict], candles: Callable[[str, str]
         if df is None or df.empty:
             continue
         sig = Signal(e["symbol"], e["interval"], e["side"], pd.Timestamp(e["time"], unit="ms", tz="UTC"),
-                     e["price"], e["sl"], list(e["tps"]), e["strategy"])
+                     e["price"], e["sl"], list(e["tps"]), e["strategy"], exit=e.get("exit_plan") or {})
         e.update(_result(track(sig, df, fee).to_dict()))
     return sorted(book.values(), key=lambda e: e["time"])
 
