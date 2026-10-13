@@ -41,7 +41,7 @@ def main() -> int:
     p.add_argument("--web", default="web", help="網頁原始檔，會複製到 --out")
     p.add_argument("--previous", help="上一次的 notifications.json，用來接續通知紀錄")
     p.add_argument("--ledger", help="上一次的 ledger.json（實盤紀錄），沒有就從頭開始")
-    p.add_argument("--strategies", nargs="+", default=["vegas_trend", "smc_sweep"], choices=sorted(signals.REGISTRY))
+    p.add_argument("--strategies", nargs="+", default=["vegas_trend", "smc_sweep", "oi_build"], choices=sorted(signals.REGISTRY))
     p.add_argument("--intervals", nargs="+", default=["4H", "2H"])
     p.add_argument("--crypto-list", choices=["top100", "volume"], default="top100",
                    help="加密貨幣：市值前 100 名（預設），或 24h 成交額 >= --min-volume")

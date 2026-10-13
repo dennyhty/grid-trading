@@ -42,3 +42,18 @@ def test_send_caps_messages(monkeypatch):
 class _Resp:
     def read(self):
         return b"{}"
+
+
+def test_outbox_skips_observation_groups(tmp_path):
+    data = tmp_path / "data"
+    data.mkdir()
+    _write(tmp_path / "prev.json", [{"id": "old"}])
+    smc = "ETH_USDT_PERP|4H|smc_sweep|1"
+    oi = "SOL_USDT_PERP|4H|oi_build|2"
+    live = "BTC_USDT_PERP|4H|vegas_trend|3"
+    _write(data / "notifications.json", [
+        {"id": f"{sid}|NEW|9", "signal_id": sid, "kind": "NEW", "text": sid, "initial": False}
+        for sid in (smc, oi, live)])
+    _write(data / "state.json", {"signals": [], "strategies": {
+        "vegas_trend": {"tag": ""}, "smc_sweep": {"tag": "SMC觀察組"}, "oi_build": {"tag": "訂單流觀察組"}}})
+    assert build_outbox(data, tmp_path / "prev.json") == [live]

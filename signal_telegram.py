@@ -35,7 +35,7 @@ def _fmt(x: float) -> str:
 
 
 def build_outbox(data_dir: Path, previous_path: Path) -> list[str]:
-    """這次新增、而且不是第一次啟動補上的通知，轉成 Telegram 訊息文字。"""
+    """這次新增、而且不是第一次啟動補上的通知，轉成 Telegram 訊息文字。觀察組（策略有 tag）的通知不送。"""
     previous = _load(previous_path)
     if not previous:
         return []  # 拿不到上一次的紀錄就不送，免得把舊通知全部重送一遍
@@ -43,10 +43,14 @@ def build_outbox(data_dir: Path, previous_path: Path) -> list[str]:
     notes = _load(data_dir / "notifications.json") or []
     state = _load(data_dir / "state.json") or {}
     signals = {s["id"]: s for s in state.get("signals", [])}
+    observe = {name for name, st in (state.get("strategies") or {}).items() if st.get("tag")}
     out = []
     for n in notes:
         if n["id"] in seen or n.get("initial"):
             continue
+        strategy = (n["signal_id"].split("|") + ["", "", ""])[2]  # id 是「幣|週期|策略|時間」
+        if strategy in observe:
+            continue  # 觀察組（SMC、訂單流…）只記錄在網站上，不推播
         text = n["text"]
         s = signals.get(n["signal_id"])
         if n["kind"] == "NEW" and s:

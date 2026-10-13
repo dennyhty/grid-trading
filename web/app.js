@@ -215,7 +215,7 @@ function renderStats() {
         ${a.expectancy_r <= 0 ? `<p class="warn">期望值是負的：照這個策略在${MARKET_LABEL[market]}上交易，長期是虧錢的。</p>`
           : a.expectancy_r < 0.1 ? `<p class="warn">期望值接近 0，優勢很小、可能只是運氣。先用小資金或只觀察。</p>` : ""}
         <p class="warn">上面的總報酬和回撤，是每個訊號都照單跟、每筆止損最多賠總資金 ${a.risk_per_trade_pct}% 算出來的${a.max_concurrent ? `；回測期間最多同時有 ${a.max_concurrent} 筆單在持倉，很多標的會一起出訊號、一起虧，所以回撤已經包含這些一起虧的單` : ""}。每筆賠得越多，回撤就成倍放大，建議每筆止損不超過總資金的 ${a.risk_per_trade_pct}%。</p>
-        ${st.tag ? `<p class="warn">${esc(st.tag)}：先記錄實盤結果，不建議照單下。把同一天、同方向的單算成一次賭注時，2024 年後的優勢接近 0，還不能當成已驗證的策略。</p>` : ""}
+        ${st.tag ? `<p class="warn">${esc(st.tag)}：只記錄實盤結果、不推播，不建議照單下。把同一天、同方向的單算成一次賭注時，2024 年後的優勢接近 0，還不能當成已驗證的策略。</p>` : ""}
         ${liveHtml(name, iv, st.tag ? a.expectancy_r : 0.07)}`);
     }
   }
@@ -506,7 +506,9 @@ function handleNotifications() {
   for (const n of notes) {
     if (notified.has(n.id)) continue;
     notified.add(n.id);
-    if (!n.initial && "Notification" in window && Notification.permission === "granted") {
+    // 觀察組（SMC、訂單流…）只記錄在通知中心，不跳出通知
+    const observe = !!(state.strategies[n.signal_id.split("|")[2]] || {}).tag;
+    if (!n.initial && !observe && "Notification" in window && Notification.permission === "granted") {
       try { new Notification(KIND_TEXT[n.kind] || "訊號", { body: n.text, tag: n.id }); } catch { /* iOS 非安裝模式不支援 */ }
     }
   }

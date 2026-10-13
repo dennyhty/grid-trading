@@ -90,6 +90,14 @@ python orderflow_oi_check.py --tf 4h     # 持倉量 × 價格的擴大參數表
 
 結論（2026-10-12）：沒有一個穩定贏過 4H vegas_trend；CVD 背離反向做每筆約 -0.1R。
 
+其中「價漲倉增」（`oi_build`，4H，過去 24 小時漲跌和持倉量增加都超過 2 個標準差）放在網站上當**訂單流觀察組**：
+只記錄實盤結果、不推播。持倉量從 `www.binance.com/futures/data/openInterestHist` 讀
+（`fapi.binance.com` 擋 GitHub Actions 的美國伺服器），只有最近 30 天。網站上的回測數字用
+`python orderflow_backtest.py --site-stats` 重算。
+
+**觀察組都不推播：** 策略有 `tag`（SMC觀察組、訂單流觀察組）的訊號只出現在網站和通知中心，
+不送 Telegram，也不跳瀏覽器通知。只有 vegas_trend 4H / 2H 會推播。
+
 ### 加新策略
 
 在 `grid_trading/signals/` 新增一個檔案，繼承 `Strategy`、實作 `prepare()`（算指標）和 `check(df, i)`
