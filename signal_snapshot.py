@@ -49,6 +49,8 @@ def main() -> int:
     p.add_argument("--min-volume-rwa", type=float, default=3e5, help="美股/商品 24h 成交額下限 (USDT)")
     p.add_argument("--markets", nargs="+", default=[CRYPTO, STOCK, COMMODITY], choices=[CRYPTO, STOCK, COMMODITY])
     p.add_argument("--keep-days", type=float, default=7)
+    p.add_argument("--max-failed", type=float, default=0.02,
+                   help="K 線抓不到的（幣, 週期）超過這個比例就不輸出，避免網站少掉一批訊號")
     args = p.parse_args()
 
     out = Path(args.out)
@@ -69,6 +71,13 @@ def main() -> int:
     symbols = liquid_symbols(args.min_volume, tuple(args.markets), args.min_volume_rwa, args.crypto_list)
     engine = Engine([signals.get(n) for n in args.strategies], symbols, args.intervals, args.keep_days, state_dir=data)
     engine.scan_once()
+    if len(engine.failed) > args.max_failed * len(symbols) * len(args.intervals):
+        # 一部分幣的 K 線沒抓到時，那些幣的訊號會整批從網站消失（例如 2H 全不見、持倉變空白）。
+        # 這種時候寧可這次不更新，網站繼續顯示上一版，等下一輪再掃。
+        print(f"{len(engine.failed)} 組 K 線重試後仍抓不到，這次不更新網站：{engine.failed[:10]}", file=sys.stderr)
+        return 1
+    if engine.failed:
+        print(f"注意：{len(engine.failed)} 組 K 線沒抓到：{engine.failed}", file=sys.stderr)
     state = engine.state()
     state["static"] = True
 
