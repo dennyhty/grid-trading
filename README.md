@@ -31,13 +31,13 @@ python signal_backtest.py          # 重跑回測，更新 stats/signal_stats.js
 預設（觀察組等其他策略）：TP1、TP2、TP3 各平 1/3；TP1 觸及後剩餘倉位止損移到 BE（進場價＋來回手續費），TP2 觸及後移到 TP1。
 策略可以依週期改出場方式（`Strategy.exit_plan`），vegas_trend 從 2026-10-13 起：
 - 4H：TP1 = 1R 平一半，止損移到 BE；剩下一半用追蹤止損 = 進場後最高價（空單最低價）往回 3 倍 ATR，只往有利方向移。
-- 2H：TP 1R / 3R / 5R 各平 1/3，其餘同預設。
+- 2H：TP 1R / 3R / 5R 各平 1/4（TP1 後移 BE、TP2 後移到 TP1），最後 1/4 用 3 倍 ATR 追蹤止損。
 同一根 K 線同時碰到止損和 TP 時保守算先止損。1R = 進場價到 SL 的距離。
 
 ### 第一個策略：維加斯通道順勢 + MACD/RSI（`vegas_trend`）
 
 價格和 EMA12 都在 EMA144/169 通道上方、且 EMA144 > EMA169 時只找多單（反之只找空單）；MACD 柱翻正（翻負）、
-RSI 在 54~70（30~46）、價格離通道不超過 3 ATR 時進場。SL = 1.5 ATR；出場見上面（4H 1R 平一半 + 追蹤，2H 1R/3R/5R）。
+RSI 在 54~70（30~46）、價格離通道不超過 3 ATR 時進場。SL = 1.5 ATR；出場見上面（4H 1R 平一半 + 追蹤，2H 1R/3R/5R 各 1/4 + 追蹤）。
 
 訊號只掃派網的合約、用派網的 K 線；回測則以**幣安 USDT 永續的歷史為主**（2020 年起，比派網長，涵蓋 2022 熊市），
 派網的回測為輔：`python signal_backtest.py --source binance`（月檔來自 data.binance.vision，只到上個月底；
