@@ -1,5 +1,6 @@
 # GitHub 的定時排程（schedule）在這個 repo 一直沒有觸發，所以改用接力的方式：
-# 這個工作每 5 分鐘觸發一次「訊號網頁」，跑大約 5 小時 40 分（單一工作最多 6 小時），
+# 這個工作每 15 分鐘觸發一次「訊號網頁」（UTC 每小時的 :02、:17、:32、:47，整點 K 線收盤後 2 分鐘就掃到），
+# 跑大約 5 小時 40 分（單一工作最多 6 小時），
 # 結束前再開一個新的自己接下去。用 GITHUB_TOKEN 觸發 workflow_dispatch 是 GitHub 允許的。
 #
 # 第一次啟動或中斷後重啟：Actions → 訊號定時器 → Run workflow。
@@ -26,12 +27,16 @@ jobs:
       REPO: ${{ github.repository }}
       BRANCH: ${{ github.event.repository.default_branch }}
     steps:
-      - name: 每 5 分鐘觸發一次訊號網頁
+      - name: 每 15 分鐘觸發一次訊號網頁（:02、:17、:32、:47）
         run: |
           end=$(( $(date +%s) + 340 * 60 ))
-          while [ "$(date +%s)" -lt "$end" ]; do
+          while :; do
+            # 等到下一個 :02 / :17 / :32 / :47（UTC）
+            now=$(date +%s)
+            next=$(( (now - 120) / 900 * 900 + 900 + 120 ))
+            [ "$next" -lt "$end" ] || break
+            sleep $(( next - now ))
             gh workflow run pages.yml --repo "$REPO" --ref "$BRANCH" || echo "觸發失敗，下一輪再試"
-            sleep 300
           done
       - name: 接力：開一個新的定時器
         run: gh workflow run ticker.yml --repo "$REPO" --ref "$BRANCH"

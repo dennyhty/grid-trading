@@ -108,11 +108,11 @@ python orderflow_oi_check.py --tf 4h     # 持倉量 × 價格的擴大參數表
 
 ### 放在 GitHub Pages（不用開電腦）
 
-`.github/workflows/pages.yml` 每 5 分鐘在 GitHub 上跑一次 `signal_snapshot.py`：掃描訊號、追蹤 TP/SL、產生圖表資料，
+`.github/workflows/pages.yml` 每 15 分鐘（UTC 每小時 :02、:17、:32、:47）在 GitHub 上跑一次 `signal_snapshot.py`：掃描訊號、追蹤 TP/SL、產生圖表資料，
 連同網頁一起直接發佈到 GitHub Pages。網址是 `https://dennyhty.github.io/grid-trading/`。
 
 - 第一次要做：到 repo 的 Settings → Pages，Source 選「GitHub Actions」。
-- 訊號和 TP/SL 觸及最快約 5 分鐘更新一次（GitHub 排程最短 5 分鐘，而且常延遲幾分鐘）。
+- 新訊號在 2H/4H 整點收盤後約 2 分鐘出現；TP/SL 觸及最多晚 15 分鐘左右更新。
 - 派網的行情 API 不允許網頁直接讀，所以網頁上的「現價」改由瀏覽器向 Binance U 本位合約抓公開即時價（每 30 秒），
   和派網價差通常很小；抓不到或差超過 5%（不是同一個商品）時，顯示掃描當下的派網價格。
 - 本機版 `python signal_server.py` 照常可用，網頁會自動判斷是哪一種模式。
@@ -121,7 +121,7 @@ python orderflow_oi_check.py --tf 4h     # 持倉量 × 價格的擴大參數表
   再找 @userinfobot 拿到自己的 Id；然後到 repo 的 Settings → Secrets and variables → Actions 新增
   `TELEGRAM_BOT_TOKEN` 和 `TELEGRAM_CHAT_ID` 兩個 secret。沒設定就不推。token 不要寫進任何檔案。
 - GitHub 內建的定時排程在這個 repo 一直沒有觸發，所以另外有 `.github/workflows/ticker.yml`（訊號定時器）：
-  一個工作每 5 分鐘觸發一次訊號網頁，跑約 5 小時 40 分後自己接力開下一個。中斷時到 Actions → 訊號定時器 → Run workflow 重新啟動；
+  一個工作每 15 分鐘（:02、:17、:32、:47）觸發一次訊號網頁，跑約 5 小時 40 分後自己接力開下一個。中斷時到 Actions → 訊號定時器 → Run workflow 重新啟動；
   要停就在同一頁 Disable workflow。這種一直開著的用法在 GitHub 規範裡算灰色地帶，有可能被 GitHub 停掉。
 - 公開 repo 的 GitHub Actions 免費。
 
