@@ -68,4 +68,4 @@ def test_smc_sweep_strategy_signals_are_stable_and_ordered():
     for s in full:
         assert s.direction * (s.price - s.sl) > 0
         assert s.direction * (s.tps[0] - s.price) > 0
-    assert strat.intervals == ("4H",) and strat.markets == ("crypto",) and strat.tag
+    assert strat.intervals == ("4H",) and strat.markets == ("crypto", "stock", "commodity") and strat.tag

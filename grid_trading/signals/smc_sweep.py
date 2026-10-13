@@ -8,7 +8,8 @@
 3. 掃完 20 根內，4H 收盤突破最近一個擺動高點，中間沒有收盤跌破掃出的低點。
 4. 突破那根收盤進場；停損在波段最低點下方 0.1 ATR（至少 0.5 ATR）；TP 1R/2R/3R，出場規則和維加斯相同。
 
-只在加密貨幣 4H 上跑（回測只驗證過這個）。2024 年後的優勢在統計上還不夠確定，所以標成觀察組。
+只在 4H 上跑。加密貨幣用幣安 2020 年起的資料驗證過，2024 年後的優勢在統計上還不夠確定，所以標成觀察組。
+2026-10-13 起也在美股、商品上跑（派網約一年的資料：美股 -0.06R、商品 +0.40R 但只有 55 筆），只觀察、不推播。
 """
 
 from __future__ import annotations
@@ -30,7 +31,7 @@ class SmcSweep(Strategy):
                    "停損在掃出的極值外側，通常比維加斯寬很多；TP 為 1R/2R/3R。")
     tag = "SMC觀察組"
     intervals = ("4H",)
-    markets = ("crypto",)
+    markets = ("crypto", "stock", "commodity")
     min_bars = 200
 
     def __init__(self, k: int = 3, liq_lookback: int = 100, sweep_window: int = 20,
