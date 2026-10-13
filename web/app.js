@@ -61,6 +61,14 @@ function fmtTime(ms, withSec = true) {
   return `${g("year")}/${g("month")}/${g("day")} ${g("hour")}:${g("minute")}${withSec ? ":" + g("second") : ""}`;
 }
 function fmtShort(ms) { return fmtTime(ms, false).slice(5); }
+// 訊號和事件的 time 是那根 K 線的「開盤」時間；訊號要等收盤才成立，TP / 止損則發生在那根 K 線裡某個時刻。
+// 網頁顯示收盤時間（= 實際確認、推播的時間），免得看起來比 Telegram 早一根 K 線。
+const barMs = (iv) => (INTERVAL_SEC[iv] || 0) * 1000;
+const ivOfId = (id) => String(id).split("|")[1];
+const closeTime = (ms, iv) => ms + barMs(iv);
+function hhmm(ms) { return fmtTime(ms, false).slice(11); }
+/** 事件發生在哪根 K 線：「10/13 10:00–12:00」。 */
+function barRange(ms, iv) { return `${fmtShort(ms)}–${hhmm(closeTime(ms, iv))}`; }
 function decimals(p) {
   if (!p) return 2;
   const a = Math.abs(p);
@@ -263,7 +271,7 @@ function timelineHtml(s) {
   return `<ul class="timeline">${ev.map((e) => {
     const bad = e.kind === "SL";
     return `<li class="${bad ? "bad" : ""}"><div>${esc(e.text)}</div>
-      <div class="t num">${fmtShort(e.time)} · ${fp(e.price, s.price)} · ${KIND_TEXT[e.kind] || e.kind}</div></li>`;
+      <div class="t num">${barRange(e.time, s.interval)} · ${fp(e.price, s.price)} · ${KIND_TEXT[e.kind] || e.kind}</div></li>`;
   }).join("")}</ul>`;
 }
 
@@ -290,7 +298,7 @@ function cardHtml(s) {
       <span class="pair">${nameHtml(s)}</span>
       <span class="chip">${s.label}</span>${tagChip(s)}${tested(s) ? "" : `<span class="chip warn-chip">未回測</span>`}
       <span class="status ${st.cls}">${st.text}</span></div>
-    <div class="meta">${esc(title)} · ${ago(s.time)} · 訊號價 ${fp(s.price)}</div>
+    <div class="meta">${esc(title)} · ${ago(closeTime(s.time, s.interval))} · 訊號價 ${fp(s.price)}</div>
     <div class="pnl"><div class="big num ${pnl >= 0 ? "up" : "down"}">${pct(pnl)}<small>${s.track.status === "OPEN" ? "未實現盈虧" : "已實現盈虧"}（1x）</small></div>
       <div class="right num">價格 ${pct(mv)}<br>現價 ${fp(price, s.price)}</div></div>
     ${ladderHtml(s, price)}
@@ -352,7 +360,7 @@ function renderDetailHead() {
   $("detail-head").innerHTML = `<div class="dh">
     <div class="row1"><span class="pair">${mk(s) === "crypto" ? pair(s.symbol) : nameHtml(s, true)}</span><span class="chip">${s.label}</span>${tagChip(s)}
       <span class="dir ${s.side === "LONG" ? "up" : "down"}">${s.side}</span></div>
-    <div class="muted">訊號時間 ${fmtTime(s.time)} · UTC+8</div>
+    <div class="muted">訊號時間 ${fmtTime(closeTime(s.time, s.interval))}（${s.label} K 線收盤確認）· UTC+8</div>
     <div class="prices"><div><span class="muted">訊號價格</span><b class="num">${fp(s.price)}</b></div>
       <div><span class="muted">現價</span><b class="num ${priceMove(s, price) >= 0 ? "up" : "down"}">${fp(price, s.price)}</b></div></div>
     <details><summary>RSI 與策略資訊</summary><div class="kv num">
@@ -544,7 +552,8 @@ function renderNotes() {
   const seen = lastSeen();
   $("notif-list").innerHTML = state.notifications.map((n) => `
     <div class="note ${!n.initial && n.created > seen ? "new" : ""}" data-id="${esc(n.signal_id)}">
-      <div>${esc(n.text)}</div><div class="t num">${fmtTime(n.time)} · ${KIND_TEXT[n.kind] || n.kind}</div></div>`).join("") ||
+      <div>${esc(n.text)}</div><div class="t num">${n.kind === "NEW" ? fmtTime(closeTime(n.time, ivOfId(n.signal_id)), false) + " 收盤確認"
+        : barRange(n.time, ivOfId(n.signal_id)) + " 之間"} · ${KIND_TEXT[n.kind] || n.kind}</div></div>`).join("") ||
     `<div class="empty">還沒有通知</div>`;
   const perm = "Notification" in window ? Notification.permission : "unsupported";
   $("notif-perm").classList.toggle("hidden", perm === "granted" || perm === "unsupported");
