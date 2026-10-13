@@ -67,3 +67,39 @@ def test_features_do_not_peek_ahead():
     cut = add_features(df.iloc[:250].copy())
     cols = ["imb3_z", "doi3_z", "ret6_z", "trend"]
     pd.testing.assert_frame_equal(full.loc[:249, cols], cut[cols])
+
+
+def test_attach_open_interest_uses_snapshot_at_bar_close():
+    from grid_trading.binance_live import attach_open_interest
+
+    t0 = pd.Timestamp("2026-10-01", tz="UTC")
+    bars = pd.DataFrame({"time": pd.date_range(t0, periods=3, freq="4h", tz="UTC")})
+    oi = pd.DataFrame({"time": pd.date_range(t0, periods=4, freq="4h", tz="UTC"), "oi": [1.0, 2.0, 3.0, 4.0]})
+    out = attach_open_interest(bars, oi.iloc[:3], "4H")
+    # 第 0 根（00:00-04:00）用 timestamp 04:00 那筆；最後一根收盤那筆還沒出來 → NaN
+    assert out["oi"].iloc[0] == 2.0 and out["oi"].iloc[1] == 3.0 and np.isnan(out["oi"].iloc[2])
+
+
+def test_oi_build_matches_research_rule_and_fetches_live_oi(monkeypatch):
+    from grid_trading.signals import oi_build
+
+    rng = np.random.default_rng(5)
+    n = 400
+    close = 100 * np.exp(np.cumsum(rng.normal(0, 0.01, n)))
+    oi = 1000 * np.exp(np.cumsum(rng.normal(0, 0.01, n)))
+    close[380:386] *= np.linspace(1.02, 1.15, 6)
+    oi[380:386] *= np.linspace(1.03, 1.25, 6)
+    df = _flow(close, rng.normal(0, 20, n), oi=oi)[["time", "open", "high", "low", "close", "volume", "oi"]]
+    research = get("of_oi", n=6, k=2.0, mode="build").scan(df, "X_USDT_PERP", "4H")
+    live = get("oi_build").scan(df, "X_USDT_PERP", "4H")
+    assert [(s.time, s.side) for s in live] == [(s.time, s.side) for s in research]
+    assert any(s.side == "LONG" and s.time > df["time"].iloc[380] for s in live)
+    assert all(s.info["details"] for s in live)
+
+    # 沒有 oi 欄位時（派網 K 線），向幣安要持倉量；timestamp = K 線收盤時間
+    snap = pd.DataFrame({"time": df["time"] + pd.Timedelta(hours=4), "oi": oi})
+    monkeypatch.setattr(oi_build, "fetch_open_interest", lambda coin, interval: snap)
+    fetched = get("oi_build").scan(df.drop(columns="oi"), "X_USDT_PERP", "4H")
+    assert [(s.time, s.side) for s in fetched] == [(s.time, s.side) for s in live]
+    monkeypatch.setattr(oi_build, "fetch_open_interest", lambda coin, interval: snap.iloc[:0])
+    assert get("oi_build").scan(df.drop(columns="oi"), "X_USDT_PERP", "4H") == []

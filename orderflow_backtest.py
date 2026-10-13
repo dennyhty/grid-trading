@@ -14,10 +14,12 @@ grid_trading.binance_history.fetch_binance(coin, "1h", flow=True) 和 grid_tradi
 from __future__ import annotations
 
 import argparse
+import json
 import math
 import os
 import sys
 from concurrent.futures import ProcessPoolExecutor
+from datetime import datetime, timezone
 from pathlib import Path
 
 import numpy as np
@@ -26,7 +28,7 @@ import pandas as pd
 from grid_trading import signals
 from grid_trading.orderflow import add_features, flow_bars
 from grid_trading.signals import orderflow  # noqa: F401  登記訂單流策略
-from grid_trading.signals.evaluate import trades_for
+from grid_trading.signals.evaluate import split_summary, trades_for
 from grid_trading.signals.strategy import LONG, SHORT, Signal
 from grid_trading.signals.tracker import track
 from grid_trading.universe import TOP100
@@ -189,13 +191,44 @@ def split_row(t: pd.DataFrame) -> dict:
     return row
 
 
+def site_coin(coin: str) -> list[dict]:
+    df = _bars(coin, "4h")
+    if df.empty:
+        return []
+    return trades_for(signals.get("oi_build"), df, f"{coin}_USDT_PERP", "4H", FEE, MAX_BARS["4h"])
+
+
+def write_site_stats(path: Path = Path("stats/signal_stats.json")) -> dict:
+    """網站上「價漲倉增觀察組」的回測數字（幣安 4H，每筆風險 0.25%），寫進 stats 的 oi_build["4H@binance"]。
+
+    派網沒有持倉量，所以沒有派網的回測。
+    """
+    with ProcessPoolExecutor(os.cpu_count() or 2) as ex:
+        trades = pd.DataFrame([t for part in ex.map(site_coin, coins()) for t in part])
+    summary = split_summary(trades, RISK)
+    strat = signals.get("oi_build")
+    summary.update({"market": "crypto", "source": "binance", "strategy": strat.name, "title": strat.title,
+                    "interval": "4H", "params": {}, "fee": FEE,
+                    "generated": datetime.now(timezone.utc).isoformat(timespec="seconds")})
+    stats = json.loads(path.read_text()) if path.exists() else {}
+    stats[strat.name] = {"4H@binance": summary}
+    path.write_text(json.dumps(stats, ensure_ascii=False, indent=2))
+    return summary
+
+
 def main() -> int:
     p = argparse.ArgumentParser(description="訂單流策略回測")
     p.add_argument("--tf", default="4h", choices=["4h", "2h"])
     p.add_argument("--out", default="output/orderflow")
     p.add_argument("--reps", type=int, default=20, help="隨機進場重複次數")
     p.add_argument("--min-trades", type=int, default=200, help="選參數時，選參數那一段至少要有的筆數")
+    p.add_argument("--site-stats", action="store_true",
+                   help="只重算網站上價漲倉增觀察組的回測數字，寫進 stats/signal_stats.json")
     args = p.parse_args()
+    if args.site_stats:
+        a = write_site_stats()["all"]
+        print(f"oi_build 4H：{a['trades']} 筆，期望值 {a['expectancy_r']:+.3f}R，最大回撤 {a['max_drawdown_pct']:.1f}%")
+        return 0
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
     cs = coins()

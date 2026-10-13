@@ -734,5 +734,68 @@
       "fee": 0.0005,
       "generated": "2026-10-12T22:54:25+00:00"
     }
+  },
+  "oi_build": {
+    "4H@binance": {
+      "all": {
+        "trades": 2591,
+        "win_rate": 0.5380162099575454,
+        "tp1_rate": 0.5380162099575454,
+        "avg_win_r": 1.0318910615488837,
+        "avg_loss_r": -1.0228573874296618,
+        "expectancy_r": 0.08263058550592003,
+        "profit_factor": 1.174863435471585,
+        "total_return_pct": 68.9601858147689,
+        "max_drawdown_pct": -10.074848556211757,
+        "risk_per_trade_pct": 0.25,
+        "long_trades": 2092,
+        "short_trades": 499,
+        "avg_bars": 7.9502122732535705,
+        "max_concurrent": 16
+      },
+      "first_half": {
+        "trades": 591,
+        "win_rate": 0.5397631133671743,
+        "tp1_rate": 0.5397631133671743,
+        "avg_win_r": 1.0389673853592902,
+        "avg_loss_r": -1.0233494152185367,
+        "expectancy_r": 0.089813121810781,
+        "profit_factor": 1.1906928560821137,
+        "total_return_pct": 13.910293482618407,
+        "max_drawdown_pct": -5.140510741588966,
+        "risk_per_trade_pct": 0.25,
+        "long_trades": 470,
+        "short_trades": 121,
+        "avg_bars": 7.373942470389171,
+        "max_concurrent": 9
+      },
+      "second_half": {
+        "trades": 2000,
+        "win_rate": 0.5375,
+        "tp1_rate": 0.5375,
+        "avg_win_r": 1.029791203599563,
+        "avg_loss_r": -1.0227127046636357,
+        "expectancy_r": 0.08050814602783361,
+        "profit_factor": 1.1702058322864572,
+        "total_return_pct": 48.32740804109243,
+        "max_drawdown_pct": -10.074848556211736,
+        "risk_per_trade_pct": 0.25,
+        "long_trades": 1622,
+        "short_trades": 378,
+        "avg_bars": 8.1205,
+        "max_concurrent": 16
+      },
+      "start": 1603252800000,
+      "end": 1790784000000,
+      "symbols": 84,
+      "market": "crypto",
+      "source": "binance",
+      "strategy": "oi_build",
+      "title": "價漲倉增（訂單流觀察組）",
+      "interval": "4H",
+      "params": {},
+      "fee": 0.0005,
+      "generated": "2026-10-13T02:09:30+00:00"
+    }
   }
 }

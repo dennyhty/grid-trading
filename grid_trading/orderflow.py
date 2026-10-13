@@ -58,6 +58,10 @@ def add_features(df: pd.DataFrame, windows=(1, 3, 6), z_len: int = 200) -> pd.Da
     if "f_ready" in df:
         return df
     df = df.copy()
+    # 即時掃描用派網 K 線時沒有主動買賣量和多空比，缺的欄位補 NaN（相關特徵就是 NaN，不會觸發）
+    for col in ("delta", "quote_volume", "oi", "account_ratio", "top_position_ratio"):
+        if col not in df:
+            df[col] = np.nan
     c = df["close"]
     df["ema144"] = ind.ema(c, 144)
     df["ema169"] = ind.ema(c, 169)
@@ -70,6 +74,7 @@ def add_features(df: pd.DataFrame, windows=(1, 3, 6), z_len: int = 200) -> pd.Da
         df[f"imb{n}"] = imb
         df[f"imb{n}_z"] = zscore(imb, z_len)
         df[f"ret{n}_z"] = zscore(np.log(c / c.shift(n)), z_len)
+        df[f"doi{n}"] = oi / oi.shift(n) - 1
         df[f"doi{n}_z"] = zscore(np.log(oi / oi.shift(n)), z_len)
         df[f"ret{n}"] = c / c.shift(n) - 1
     df["vol_z"] = zscore(np.log(df["quote_volume"].replace(0, np.nan)), z_len)
