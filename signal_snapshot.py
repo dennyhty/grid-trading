@@ -16,6 +16,7 @@ import argparse
 import json
 import shutil
 import sys
+import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -55,6 +56,11 @@ def main() -> int:
     if out.exists():
         shutil.rmtree(out)
     shutil.copytree(args.web, out)
+    # 每次部署給 app.js、style.css 加上版本號，瀏覽器才不會拿舊的頁面配新的程式（或反過來）
+    version = str(int(time.time()))
+    index = out / "index.html"
+    index.write_text(index.read_text().replace('src="app.js"', f'src="app.js?v={version}"')
+                     .replace('href="style.css"', f'href="style.css?v={version}"'))
     data.mkdir(parents=True)
     (out / ".nojekyll").write_text("")
     if args.previous and Path(args.previous).exists():
