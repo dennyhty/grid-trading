@@ -7,7 +7,7 @@ from grid_trading.signals.strategy import LONG, SHORT, Signal
 from grid_trading.signals.tracker import track
 
 numba = pytest.importorskip("numba")  # 研究程式才用到 numba
-import classic_indicator_study as cs  # noqa: E402
+from research import classic_indicator_study as cs  # noqa: E402
 
 
 def random_candles(n=1500, seed=0):

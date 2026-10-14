@@ -46,6 +46,19 @@ class PionexPublic:
             out.append(name)
         return out
 
+    def perp_specs(self) -> dict[str, dict]:
+        """每個永續合約的下單限制：min_size 最小數量（顆）、step 數量級距、min_notional 最小名目金額（USDT）。"""
+        data = self._get("/api/v1/common/symbols", {"type": "PERP"})
+        out = {}
+        for s in data.get("symbols", []):
+            try:
+                out[s["symbol"]] = {"min_size": float(s.get("minSizeMarket") or s.get("minSizeLimit") or 0),
+                                    "step": float(s.get("baseStep") or 0),
+                                    "min_notional": float(s.get("minNotional") or 0)}
+            except (KeyError, TypeError, ValueError):
+                continue
+        return out
+
     def perp_tickers(self) -> pd.DataFrame:
         """24 小時行情，amount 欄位是以 USDT 計的成交額。"""
         data = self._get("/api/v1/market/tickers", {"type": "PERP"})

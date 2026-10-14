@@ -1,4 +1,4 @@
-"""橫斷面強弱輪動：python alt_momentum.py [--out output]
+"""橫斷面強弱輪動：python -m research.alt_momentum [--out output]
 
 每隔 H 天（週一 00:00 UTC，也就是週日日線收盤）把流動性夠的幣依過去 L 天漲幅排名：
 - mom：做多最強 k 個、做空最弱 k 個；rev：反過來（短期反轉）。

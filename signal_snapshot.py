@@ -22,6 +22,7 @@ from pathlib import Path
 
 from grid_trading import signals
 from grid_trading.markets import COMMODITY, CRYPTO, STOCK
+from grid_trading.pionex import PionexPublic
 from grid_trading.signals import ledger as ledger_mod
 from grid_trading.signals.engine import Engine
 from signal_backtest import liquid_symbols
@@ -33,6 +34,16 @@ CHART_INTERVALS = ["15M", "60M", "4H", "1D"]
 def write_json(path: Path, obj) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(_sanitize(obj), ensure_ascii=False, separators=(",", ":"), allow_nan=False))
+
+
+def order_specs(symbols: set[str], previous: dict) -> dict:
+    """網頁「下單計算」用的派網最小下單量；抓不到就沿用上一次的。"""
+    try:
+        specs = PionexPublic().perp_specs()
+    except Exception as e:
+        print(f"注意：派網下單限制抓不到（{e}），沿用上一次的", file=sys.stderr)
+        specs = previous
+    return {s: specs[s] for s in sorted(symbols) if s in specs}
 
 
 def main() -> int:
@@ -92,6 +103,7 @@ def main() -> int:
                              engine.fee)
     write_json(data / "ledger.json", book)
     state["ledger"] = ledger_mod.summary(book)
+    state["specs"] = order_specs({s["symbol"] for s in state["signals"]}, prev_state.get("specs") or {})
     write_json(data / "state.json", state)
 
     pairs = {(s["symbol"], s["interval"], s["strategy"]) for s in state["signals"]}

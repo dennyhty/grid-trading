@@ -1,6 +1,6 @@
 """vegas_trend 止損深入研究（只做分析，不改實盤規則）。
 
-python stop_research.py --interval 4H [--sub] [--slip 0.0005] [--source pionex]
+python -m research.stop_research --interval 4H [--sub] [--slip 0.0005] [--source pionex]
 
 需要另外 pip install numba（只有研究程式用到，網站不需要）。
 
@@ -22,7 +22,7 @@ python stop_research.py --interval 4H [--sub] [--slip 0.0005] [--source pionex]
 - stop_signals_{週期}{標記}.npz：每個訊號 × 設定的 R、出場 K 棒等，給後續分析用。
 - stop_paths_{週期}{標記}.npz：每個訊號往有利/不利方向走到 k 倍 ATR 的第一根 K 棒（診斷用）。
 
-python stop_research.py --interval 4H --analyze 讀上面幣安的結果（主回測，加上有跑過的 --slip、--sub 情境），輸出：
+python -m research.stop_research --interval 4H --analyze 讀上面幣安的結果（主回測，加上有跑過的 --slip、--sub 情境），輸出：
 - stop_race_{週期}.csv：止損 x ATR 和目標誰先到（訊號 vs 隨機進場）。
 - stop_selection_{週期}.csv：用一段時期挑前幾名設定、看另一段的表現。
 - stop_bootstrap_{週期}.csv：主要候選和實盤的 Sharpe 差（30 天一塊重抽）。
@@ -563,7 +563,7 @@ def make_grid(meta, res, rmeta, rres, names, groups) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-# ---------- 第二步：讀第一步的輸出做診斷和檢驗（python stop_research.py --interval 4H --analyze） ----------
+# ---------- 第二步：讀第一步的輸出做診斷和檢驗（python -m research.stop_research --interval 4H --analyze） ----------
 
 def race_table(tag: str, out: Path) -> pd.DataFrame:
     """止損 x 倍 ATR、目標 y 倍 ATR，哪個先到（同一根 K 棒都碰到算止損先到）。訊號 vs 趨勢一致的隨機進場。"""

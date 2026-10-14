@@ -1,6 +1,6 @@
 """SMC 觀察組：4H 掃流動性 → 結構轉變，突破那根收盤進場，只做日線結構的方向。
 
-定義見 grid_trading/smc.py，回測見 smc_backtest.py 和專案的 report_smc_ict_20261012.md。
+定義見 grid_trading/smc.py，回測見 research/smc_backtest.py 和專案的 report_smc_ict_20261012.md。
 以做多為例（做空反過來）：
 
 1. 日線結構向上：日線最近一次收盤突破的是擺動高點（擺動點 = 左右各 3 根都不比它高 / 低）。

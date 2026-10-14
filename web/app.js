@@ -413,6 +413,72 @@ function renderLevels() {
     ${ladderHtml(s, s.live)}${timelineHtml(s)}`;
 }
 
+// ---------- 下單計算：資金 × 每筆風險 % → 每一份要下多少（照派網最小下單量進位） ----------
+function sizing() {
+  const num = (k, d) => { try { const v = Number(localStorage.getItem(k)); return v > 0 ? v : d; } catch { return d; } };
+  return { capital: num("capital", 100), riskPct: num("riskPct", 0.25) };
+}
+
+/** 每一份的數量。數量照派網的級距取整，低於最小數量 / 最小名目金額時用最小值（風險會變大）。 */
+function sizePlan(s, capital, riskPct, spec) {
+  const riskU = capital * riskPct / 100;
+  const dist = Math.abs(s.price - s.sl);
+  const total = riskU / dist;
+  const e = s.exit || {};
+  const parts = (e.portions || [1 / 3, 1 / 3, 1 / 3]).slice(0, s.tps.length);
+  const rest = 1 - parts.reduce((a, b) => a + b, 0);
+  const slices = parts.map((p, k) => ({ name: `TP${k + 1}`, price: s.tps[k], p }));
+  if (rest > 1e-6) slices.push({ name: "追蹤", price: null, p: rest });
+  const step = spec && spec.step > 0 ? spec.step : 0;
+  const minQ = spec ? Math.max(spec.min_size || 0, (spec.min_notional || 0) / s.price) : 0;
+  const roundStep = (q) => step ? Math.round(q / step) * step : q;
+  const ceilStep = (q) => step ? Math.ceil(q / step - 1e-9) * step : q;
+  const minQty = ceilStep(minQ);
+  for (const x of slices) {
+    const raw = total * x.p;
+    x.qty = roundStep(raw);
+    x.bumped = x.qty < minQty;
+    if (x.bumped) x.qty = minQty;
+  }
+  const qty = slices.reduce((a, x) => a + x.qty, 0);
+  const digits = step ? Math.max(0, -Math.floor(Math.log10(step) + 1e-9)) : 6;
+  return { riskU, total, slices, qty, digits, notional: qty * s.price, actualRisk: qty * dist, spec };
+}
+
+function renderSize() {
+  const s = current;
+  if (!s) return;
+  const { capital, riskPct } = sizing();
+  const spec = (state.specs || {})[s.symbol];
+  const plan = sizePlan(s, capital, riskPct, spec);
+  const coin = mk(s) === "crypto" ? pair(s.symbol).split("/")[0] : s.symbol.replace("_USDT_PERP", "");
+  const q = (x) => x.toFixed(plan.digits);
+  const over = plan.actualRisk > plan.riskU * 1.2;
+  $("detail-size").innerHTML = `<h3 class="size-h">下單計算</h3>
+    <div class="size-in">
+      <label>資金 <input id="sz-cap" type="number" inputmode="decimal" min="1" step="any" value="${capital}"> U</label>
+      <label>每筆風險 <input id="sz-risk" type="number" inputmode="decimal" min="0.01" step="0.05" value="${riskPct}"> %</label>
+    </div>
+    <div class="kv num">
+      <span>止損賠</span><span>${plan.riskU.toFixed(2)} U（進場到 SL ${(Math.abs(s.price - s.sl) / s.price * 100).toFixed(2)}%）</span>
+      <span>總數量</span><span>${q(plan.qty)} ${esc(coin)}（約 ${plan.notional.toFixed(2)} U，資金的 ${(plan.notional / capital).toFixed(1)} 倍）</span>
+      ${plan.slices.map((x) => `<span>${x.name}${x.price != null ? ` @ ${fp(x.price, s.price)}` : ""}</span>
+        <span>${q(x.qty)} ${esc(coin)}${x.bumped ? ` <i class="warn">已調到最小下單量</i>` : ""}</span>`).join("")}
+      <span>實際止損賠</span><span class="${over ? "down" : ""}">${plan.actualRisk.toFixed(2)} U（資金的 ${(plan.actualRisk / capital * 100).toFixed(2)}%）</span>
+    </div>
+    <p class="muted">${spec ? `派網最小下單量 ${spec.min_size} ${esc(coin)}、最少 ${spec.min_notional} U；數量照 ${spec.step} 的級距取整。` : "這個標的沒有派網的下單限制資料，沒檢查最小下單量。"}
+      ${over ? "最小下單量讓實際風險比設定多，照專案規則還是下最小量（不要跳過這單）。" : ""}
+      價格用訊號價算；實際進場價不同時，數量照比例差一點沒關係，止損價照上面的 SL 掛。</p>`;
+  const save = (k, id) => () => {
+    const v = Number($(id).value);
+    if (!(v > 0)) return;
+    try { localStorage.setItem(k, String(v)); } catch { /* 私密模式 */ }
+    renderSize();
+  };
+  $("sz-cap").addEventListener("change", save("capital", "sz-cap"));
+  $("sz-risk").addEventListener("change", save("riskPct", "sz-risk"));
+}
+
 function openDetail(id) {
   const s = state && state.signals.find((x) => x.id === id);
   if (!s) return;
@@ -427,6 +493,7 @@ function openDetail(id) {
   sel.innerHTML = ivs.map((iv, k) => `<option value="${iv}">${lbl(iv)}${k === 0 ? " · 原訊號" : ""}</option>`).join("");
   renderDetailHead();
   renderLevels();
+  renderSize();
   loadChart(s.interval, true);
   window.scrollTo(0, 0);
 }

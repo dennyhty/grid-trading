@@ -1,4 +1,4 @@
-"""逐筆驗證群組訊號的實際結果：python verify_signals.py
+"""逐筆驗證群組訊號的實際結果：python -m research.verify_signals
 
 用派網 15 分 K 線看訊號發出後先碰到停損還是停利，並計算跟單結果（以 R = 停損距離為單位）：
 - 「TP1 全出」：碰到 TP1 全部平倉，看純勝率

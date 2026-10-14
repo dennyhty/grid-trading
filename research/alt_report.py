@@ -1,4 +1,4 @@
-"""讀 alt_*_trades.csv.gz，做選參數 / 驗證 / 反向切分 / 隨機對照：python alt_report.py FILE [FILE...] [--out output]
+"""讀 alt_*_trades.csv.gz，做選參數 / 驗證 / 反向切分 / 隨機對照：python -m research.alt_report FILE [FILE...] [--out output]
 
 選法：在選參數那段挑 t 值（期望值 / 標準誤）最高、且筆數 >= MIN_N 的設定，再看另一段的成績。
 正向：2020-23 選、2024-26 驗證；反向：2024-26 選、2020-23 驗證。
