@@ -1,4 +1,4 @@
-"""強弱輪動與 VWAP 回踩的細部檢查：多空兩腿、隨機對照、只用老幣的穩健性測試。python alt_extra.py"""
+"""強弱輪動與 VWAP 回踩的細部檢查：多空兩腿、隨機對照、只用老幣的穩健性測試。python -m research.alt_extra"""
 
 from __future__ import annotations
 
@@ -8,8 +8,8 @@ import warnings
 import numpy as np
 import pandas as pd
 
-import alt_momentum as am
-import alt_strategies as st
+from research import alt_momentum as am
+from research import alt_strategies as st
 from grid_trading.altsim import TRAIN, VALID, load_bars, random_null, stats, window, coins, FEE
 
 warnings.filterwarnings("ignore")

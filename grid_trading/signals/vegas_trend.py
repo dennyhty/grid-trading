@@ -9,7 +9,7 @@
   - 2H：TP 1R / 3R / 5R 各平 1/4，TP1 後止損移到保本、TP2 後移到 TP1；最後 1/4 用 3 倍 ATR 追蹤止損
     （2026-10-13 晚上加上，原本是 1R/3R/5R 各平 1/3：幣安每筆 +0.105R → +0.130R，兩段時期都比較好）。
   - 其他週期：TP 1R / 2R / 3R 各平 1/3。
-  幣安 2020 年起回測（exit_backtest.py）：4H 每筆 +0.112R → +0.153R，2H +0.079R → +0.105R，
+  幣安 2020 年起回測（research/exit_backtest.py）：4H 每筆 +0.112R → +0.153R，2H +0.079R → +0.105R，
   2020-23 和 2024 年後兩段都比較好，勝率仍約 55%。
 
 RSI 範圍在 2026-10-12 從 50~70 / 30~50 收緊成 54~70 / 30~46：幣安 2H、4H 回測裡，不論用 2020~2023 年
@@ -18,7 +18,7 @@ RSI 範圍在 2026-10-12 從 50~70 / 30~50 收緊成 54~70 / 30~46：幣安 2H�
 2H 從 2026-10-13 起：訊號 K 棒的 ADX(14) ≥ 24 不做（MAX_ADX）。幣安 2020 年起，這些單約佔 2H 的 16%，
 2020-23 和 2024 年後每筆都約 0R；跳過後 Sharpe 1.39 → 1.59、勝率 53.8% → 54.6%，7 年裡 6 年比較好。
 派網 2H 只有 2025-09 起的資料，這段沒有改善；4H 用同樣規則也沒有幫助，所以只用在 2H
-（entry_research.py，報告 report_vegas_trend_entry_20261013.md）。
+（research/entry_research.py，報告 report_vegas_trend_entry_20261013.md）。
 """
 
 from __future__ import annotations
@@ -26,6 +26,7 @@ from __future__ import annotations
 import pandas as pd
 
 from .. import indicators as ind
+from ..markets import COMMODITY, STOCK
 from .strategy import LONG, SHORT, Strategy, register
 
 
@@ -33,6 +34,8 @@ from .strategy import LONG, SHORT, Strategy, register
 class VegasTrend(Strategy):
     name = "vegas_trend"
     title = "維加斯通道順勢 + MACD/RSI"
+    # 美股、商品只有約一年資料、看不出優勢，2026-10-14 起改成觀察組（不推播）
+    market_tags = {STOCK: "維加斯觀察組", COMMODITY: "維加斯觀察組"}
     description = ("價格在 EMA144/169 通道上方且通道向上時只做多、下方向下時只做空；"
                    "MACD 柱翻轉且 RSI 同向時進場。停損 1.5 倍 ATR；4H 在 1R 平一半、其餘 3 ATR 追蹤止損，"
                    "2H 的 TP 為 1R/3R/5R 各平 1/4、最後 1/4 用 3 ATR 追蹤止損，且 ADX ≥ 24 時不做。")

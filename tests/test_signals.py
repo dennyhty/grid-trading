@@ -203,3 +203,11 @@ def test_vegas_2h_skips_signals_with_high_adx():
     assert high and len(high) < len(every)
     assert [s.time for s in v.scan(df, "X", "2H")] == [s.time for s in every if s.time not in high]
     assert all(abs(s.info["adx"] - adx[s.time]) < 0.05 for s in every)
+
+
+def test_vegas_trend_is_observation_group_on_stocks_and_commodities():
+    from grid_trading import signals
+    v = signals.get("vegas_trend")
+    assert v.tag_for("crypto") == ""
+    assert v.tag_for("stock") and v.tag_for("commodity")
+    assert signals.get("smc_sweep").tag_for("crypto") == "SMC觀察組"

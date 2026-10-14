@@ -1,4 +1,4 @@
-"""回測從群組交易訊號回推的順勢突破規則：python group_signal_backtest.py
+"""回測從群組交易訊號回推的順勢突破規則：python -m research.group_signal_backtest
 
 1. 先確認規則在三則真實訊號的時間點會不會觸發
 2. 再用一年多的 1H K 線，在派網流動性夠的永續合約上跑一遍，看長期期望值
@@ -6,7 +6,7 @@
 出場：TP1 平一半並把停損移到進場價，剩下一半在 TP2 或停損出場，最多持有 7 天。
 TP2 設成 1R 時等於在 TP1 全部出場。
 
-python group_signal_backtest.py --universe top100 --suite group  # 市值前 100 名、群組訊號規則
+python -m research.group_signal_backtest --universe top100 --suite group  # 市值前 100 名、群組訊號規則
 同一根 K 線同時碰到停損和停利時，保守當作先停損。
 """
 

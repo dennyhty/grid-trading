@@ -1,7 +1,7 @@
 import numpy as np
 import pandas as pd
 
-from dca_backtest import Rule, simulate
+from research.dca_backtest import Rule, simulate
 
 
 def _run(rule, cond=None, mult=None, opens=None):

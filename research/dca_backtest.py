@@ -8,7 +8,7 @@
 - 訊號用前一天收盤算，隔天開盤價買（不偷看），手續費 0.05%。
 - deadline=N：一筆錢存超過 N 天還沒等到訊號，就照樣買掉（先進先出），避免錢一直閒置。
 
-用法：python dca_backtest.py  →  輸出 output/dca/*.csv 與終端機摘要
+用法：python -m research.dca_backtest  →  輸出 output/dca/*.csv 與終端機摘要
 """
 
 from __future__ import annotations

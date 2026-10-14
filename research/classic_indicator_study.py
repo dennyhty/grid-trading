@@ -4,18 +4,18 @@
 唐奇安、肯特納、一目均衡表、HMA、OBV、量價背離…）各自寫成進出場規則，用同一套資料、手續費和出場方式回測，
 再和隨機進場、實盤的維加斯趨勢比較。
 
-python classic_indicator_study.py --fetch                  下載幣安 4h、1h 月檔 K 線（data/binance/，已下載的跳過）
-python classic_indicator_study.py --fetch-funding          下載幣安資金費率月檔（data/binance/funding/）
-python classic_indicator_study.py --run --tf 4H             第一步：每個策略的訊號和出場結果（2H 同理；加 --slip 0.0005 是滑價版）
-python classic_indicator_study.py --analyze                 第二步：統計、樣本外、過度擬合、相關性、勝率與期望值
-python classic_indicator_study.py --market                  市場本身的性質：變異數比、時間序列動能
-python classic_indicator_study.py --mechanism               獲利來自大盤還是個別幣；市場寬度、同時出訊號的幣數
-python classic_indicator_study.py --robust                  區塊重抽、多重檢定、幣種子集、同時持倉（--analyze、--mechanism 之後）
-python classic_indicator_study.py --run --pionex --tf 4H    派網 K 線複核（4H 約 2023 年起、2H 約 14 個月）
-python classic_indicator_study.py --pionex-check            派網和幣安同一段時間、同一批幣對照
-python classic_indicator_study.py --regime                  BTC 200 日均線多空過濾（事先定好的單一規則，50 日線當對照）
-python classic_indicator_study.py --cap                     每天最多開 1/2/3/5 張時的結果（手動下單做不了每個訊號）
-python classic_indicator_study.py --export DIR --prefix P   彙總表和各項結果存成 DIR/P*.csv（utf-8-sig，Excel 可直接開）
+python -m research.classic_indicator_study --fetch                  下載幣安 4h、1h 月檔 K 線（data/binance/，已下載的跳過）
+python -m research.classic_indicator_study --fetch-funding          下載幣安資金費率月檔（data/binance/funding/）
+python -m research.classic_indicator_study --run --tf 4H             第一步：每個策略的訊號和出場結果（2H 同理；加 --slip 0.0005 是滑價版）
+python -m research.classic_indicator_study --analyze                 第二步：統計、樣本外、過度擬合、相關性、勝率與期望值
+python -m research.classic_indicator_study --market                  市場本身的性質：變異數比、時間序列動能
+python -m research.classic_indicator_study --mechanism               獲利來自大盤還是個別幣；市場寬度、同時出訊號的幣數
+python -m research.classic_indicator_study --robust                  區塊重抽、多重檢定、幣種子集、同時持倉（--analyze、--mechanism 之後）
+python -m research.classic_indicator_study --run --pionex --tf 4H    派網 K 線複核（4H 約 2023 年起、2H 約 14 個月）
+python -m research.classic_indicator_study --pionex-check            派網和幣安同一段時間、同一批幣對照
+python -m research.classic_indicator_study --regime                  BTC 200 日均線多空過濾（事先定好的單一規則，50 日線當對照）
+python -m research.classic_indicator_study --cap                     每天最多開 1/2/3/5 張時的結果（手動下單做不了每個訊號）
+python -m research.classic_indicator_study --export DIR --prefix P   彙總表和各項結果存成 DIR/P*.csv（utf-8-sig，Excel 可直接開）
 
 需要 numba（pip install numba，只有研究程式用到）。
 

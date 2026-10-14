@@ -1,9 +1,9 @@
 """vegas_trend 進場條件與選幣研究（只做分析，不改實盤規則）。
 
-python entry_research.py --interval 4H [--source pionex] [--slip 0.0005]   第一步：訊號、特徵、實盤出場的 R
-python entry_research.py --interval 4H --analyze                         第二步：分組、過濾、挑選驗證、選幣
-python entry_research.py --interval 4H --timing                          進場時機：延遲、回踩掛單、等下一根確認
-python entry_research.py --interval 4H --delay                           收到訊號晚幾分鐘下單：0/1/2/3/5/10/15 分鐘（1 分鐘 K 線）
+python -m research.entry_research --interval 4H [--source pionex] [--slip 0.0005]   第一步：訊號、特徵、實盤出場的 R
+python -m research.entry_research --interval 4H --analyze                         第二步：分組、過濾、挑選驗證、選幣
+python -m research.entry_research --interval 4H --timing                          進場時機：延遲、回踩掛單、等下一根確認
+python -m research.entry_research --interval 4H --delay                           收到訊號晚幾分鐘下單：0/1/2/3/5/10/15 分鐘（1 分鐘 K 線）
 
 需要 numba（和 stop_research.py 共用模擬程式）。
 
@@ -42,7 +42,7 @@ from grid_trading.binance_history import FILES, binance_symbols, load
 from grid_trading.signals.strategy import LONG
 from grid_trading.signals.vegas_trend import VegasTrend
 from grid_trading.universe import TOP100
-from stop_research import (LIVE_ATR, MAX_BARS, MIN_STOP_PCT, PARENT_MS, PLANS, SPLIT, busy_filter, cluster_key,
+from research.stop_research import (LIVE_ATR, MAX_BARS, MIN_STOP_PCT, PARENT_MS, PLANS, SPLIT, busy_filter, cluster_key,
                            cluster_stats, load_frame, periods, sim_many, summarize)
 
 BARS_PER_DAY = {"4H": 6, "2H": 12}

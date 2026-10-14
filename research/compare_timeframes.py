@@ -1,4 +1,4 @@
-"""多週期比較：python compare_timeframes.py --group crypto（或 rwa）[--source binance|pionex]
+"""多週期比較：python -m research.compare_timeframes --group crypto（或 rwa）[--source binance|pionex]
 
 加密貨幣預設用幣安的資料（時間長，從 2020-01 起），派網的資料當輔助；RWA 只有派網有。
 

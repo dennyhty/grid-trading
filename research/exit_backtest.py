@@ -1,6 +1,6 @@
 """vegas_trend 止損 / 止盈設定研究（只做分析，不改實盤規則）。
 
-python exit_backtest.py --interval 4H [--fee 0.0005]
+python -m research.exit_backtest --interval 4H [--fee 0.0005]
 
 需要另外 pip install numba（只有這支研究程式用到，網站不需要）。
 
