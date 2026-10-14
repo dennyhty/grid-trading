@@ -207,36 +207,48 @@ class Engine:
                     if (strat.intervals and interval not in strat.intervals) or \
                             (strat.markets and classify(sym) not in strat.markets):
                         continue
-                    busy_until = None
+                    scanned = {f"{sym}|{interval}|{strat.name}|{int(sig.time.timestamp())}": sig
+                               for sig in strat.scan(closed, sym, interval, start=start)}
+                    # 已經發出、還沒結束的單優先：照樣追蹤到結束，期間同一個幣不出新訊號。
+                    # 進場規則改了以後（例如 2H 加上 ADX 過濾），重新掃描不會再出現的舊單也照樣追蹤，網站上的持倉不會消失
+                    held: list[tuple[pd.Timestamp, pd.Timestamp]] = []
                     for old in sorted(lingering.get((sym, interval, strat.name), []), key=lambda o: o["time"]):
                         t0 = pd.Timestamp(old["time"], unit="ms", tz="UTC")
-                        if t0 >= window:
-                            continue  # 還在掃描範圍內，下面會重新掃到
-                        if df["time"].iloc[0] > t0:
+                        sig = scanned.pop(old["id"], None)
+                        if sig is not None:  # 還在掃描範圍內，用這次掃到的（規則若改了，用新的出場方式）
+                            res = track(sig, df, self.fee)
+                            found[old["id"]] = self._entry(sig, res)
+                        elif df["time"].iloc[0] > t0:
                             found[old["id"]] = old  # K 線不夠長，沒辦法重新追蹤，先沿用
-                            busy_until = now + bar
+                            held.append((t0, now + bar))
                             continue
-                        sig = Signal(sym, interval, old["side"], t0, old["price"], old["sl"], list(old["tps"]),
-                                     strat.name, old.get("info") or {}, old.get("exit") or {})
-                        res = track(sig, df, self.fee)
-                        found[old["id"]] = {**old, "track": res.to_dict()}
-                        busy_until = res.events[-1].time if res.status == "CLOSED" else now + bar
-                    for sig in strat.scan(closed, sym, interval, start=start):
-                        if busy_until is not None and sig.time < busy_until:
+                        else:
+                            sig = Signal(sym, interval, old["side"], t0, old["price"], old["sl"], list(old["tps"]),
+                                         strat.name, old.get("info") or {}, old.get("exit") or {})
+                            res = track(sig, df, self.fee)
+                            found[old["id"]] = {**old, "track": res.to_dict()}
+                        held.append((t0, res.events[-1].time if res.status == "CLOSED" else now + bar))
+                    busy_until = None
+                    for sid, sig in scanned.items():
+                        if (busy_until is not None and sig.time < busy_until) or \
+                                any(t0 <= sig.time < t1 for t0, t1 in held):
                             continue
                         res = track(sig, df, self.fee)  # 含尚未收盤的那根，盤中觸及也算
-                        if res.status == "CLOSED":
-                            busy_until = res.events[-1].time
-                        else:
-                            busy_until = now + bar
-                        sid = f"{sym}|{interval}|{strat.name}|{int(sig.time.timestamp())}"
-                        found[sid] = {"id": sid, "label": label(interval), "market": classify(sym),
-                                      "name": display_name(sym), **sig.to_dict(),
-                                      "track": res.to_dict()}
+                        end = res.events[-1].time if res.status == "CLOSED" else now + bar
+                        if any(sig.time < t0 < end for t0, _ in held):
+                            continue  # 會和已經發出的單重疊
+                        busy_until = end
+                        found[sid] = self._entry(sig, res)
         with self.lock:
             self._notify(found)
             self.signals = found
             self.updated = int(time.time() * 1000)
+
+    @staticmethod
+    def _entry(sig: Signal, res) -> dict:
+        sid = f"{sig.symbol}|{sig.interval}|{sig.strategy}|{int(sig.time.timestamp())}"
+        return {"id": sid, "label": label(sig.interval), "market": classify(sig.symbol),
+                "name": display_name(sig.symbol), **sig.to_dict(), "track": res.to_dict()}
 
     def _notify(self, found: dict[str, dict]) -> None:
         first_run = not self.signals and not self.notifications

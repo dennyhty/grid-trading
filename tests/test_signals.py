@@ -185,3 +185,21 @@ def test_vegas_exit_plans_by_interval():
     assert v.exit_plan("2H")["tp_r"] == [1.0, 3.0, 5.0]
     assert v.exit_plan("2H")["trail_atr"] == 3.0 and sum(v.exit_plan("2H")["portions"]) == 0.75
     assert v.exit_plan("60M") is None
+
+
+def test_vegas_2h_skips_signals_with_high_adx():
+    rng = np.random.default_rng(0)
+    n = 3000
+    close = 100 * np.exp(np.cumsum(0.001 * np.sin(np.arange(n) / 150) + 0.008 * rng.standard_normal(n)))
+    op = np.r_[close[0], close[:-1]]
+    wick = 0.003 * np.abs(rng.standard_normal(n))
+    df = pd.DataFrame({"close": close, "open": op, "high": np.maximum(op, close) * (1 + wick),
+                       "low": np.minimum(op, close) * (1 - wick), "volume": 1.0})
+    df["time"] = pd.date_range(T0, periods=n, freq="2h", tz="UTC")
+    v = get("vegas_trend")
+    every = v.scan(df, "X", "4H")  # 4H 沒有 ADX 過濾，拿來當全部的訊號
+    adx = pd.Series(ind.adx(df).to_numpy(), index=df["time"] + pd.Timedelta("2h"))
+    high = [s.time for s in every if adx[s.time] >= 24]
+    assert high and len(high) < len(every)
+    assert [s.time for s in v.scan(df, "X", "2H")] == [s.time for s in every if s.time not in high]
+    assert all(abs(s.info["adx"] - adx[s.time]) < 0.05 for s in every)

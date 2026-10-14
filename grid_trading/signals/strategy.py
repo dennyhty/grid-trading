@@ -69,6 +69,10 @@ class Strategy:
         """
         return None
 
+    def accept(self, df: pd.DataFrame, i: int, interval: str) -> bool:
+        """（可選）只在某些週期才用的進場條件：check() 觸發後再檢查一次，回傳 False 就不出訊號。"""
+        return True
+
     def candidates(self, df: pd.DataFrame):
         """（可選）用向量運算先挑出可能觸發的 K 線，回傳布林陣列；只有 True 的那幾根才呼叫 check()。
 
@@ -87,6 +91,8 @@ class Strategy:
         for i in rows:
             hit = self.check(df, int(i))
             if hit is None:
+                continue
+            if not self.accept(df, int(i), interval):
                 continue
             side, sl, tps, info = hit
             price = float(df["close"].iloc[i])

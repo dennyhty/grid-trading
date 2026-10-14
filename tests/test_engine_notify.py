@@ -173,3 +173,35 @@ def test_open_signal_older_than_keep_days_is_still_tracked(tmp_path, monkeypatch
     eng.previous = {sid: {**old, "track": {"status": "CLOSED", "events": []}}}
     eng.scan_once()
     assert sid not in eng.signals
+
+
+def test_open_signal_dropped_by_a_rule_change_is_still_tracked(tmp_path, monkeypatch):
+    import pandas as pd
+
+    from grid_trading.signals.strategy import Signal, Strategy
+
+    bar = 14_400_000
+    now = int(time.time() * 1000) // bar * bar + 60_000
+    df = _candles(300, now - 300 * bar, bar, highs={295: 106.0})  # 第 295 根碰到 TP1
+    sig_time = int(df["time"].iloc[290].timestamp() * 1000)  # 約 2 天前，還在掃描範圍內
+    sid = f"BTC_USDT_PERP|4H|vegas_trend|{sig_time // 1000}"
+    old = {"id": sid, "label": "4H", "market": "crypto", "name": "BTC", "symbol": "BTC_USDT_PERP", "interval": "4H",
+           "side": "LONG", "time": sig_time, "price": 100.0, "sl": 95.0, "tps": [105.0, 110.0, 115.0],
+           "strategy": "vegas_trend", "info": {}, "track": {"status": "OPEN", "events": []}}
+    t = lambda i: df["time"].iloc[i] + pd.Timedelta(milliseconds=bar)  # noqa: E731
+
+    class NewRule(Strategy):
+        """新規則不再出現 sig_time 那一單；另外多了兩單：一單會開到那一單之後，一單在那一單持有期間。"""
+        name = "vegas_trend"
+
+        def scan(self, df, symbol, interval, start=None):
+            mk = lambda i: Signal(symbol, interval, "LONG", t(i), 100.0, 95.0, [105.0, 110.0, 115.0], self.name)  # noqa: E731
+            return [mk(280), mk(292)]
+
+    eng = Engine([NewRule()], ["BTC_USDT_PERP"], ["4H"], state_dir=tmp_path)
+    eng.previous = {sid: old}
+    monkeypatch.setattr(eng, "klines_many", lambda jobs, bars=1000: {j: df for j in jobs})
+    eng.scan_once()
+    assert sid in eng.signals and eng.signals[sid]["track"]["tps_hit"] == 1
+    # 兩單新的都會和已經發出、還沒結束的那一單重疊，不出
+    assert set(eng.signals) == {sid}

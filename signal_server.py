@@ -77,7 +77,7 @@ def main() -> int:
     p = argparse.ArgumentParser(description="交易訊號網頁")
     p.add_argument("--host", default="0.0.0.0")
     p.add_argument("--port", type=int, default=8000)
-    p.add_argument("--strategies", nargs="+", default=["vegas_trend", "smc_sweep", "oi_build"], choices=sorted(signals.REGISTRY))
+    p.add_argument("--strategies", nargs="+", default=["vegas_trend", "smc_sweep", "smc_sweep_2h", "oi_build", "oi_build_2h"], choices=sorted(signals.REGISTRY))
     p.add_argument("--intervals", nargs="+", default=["4H", "2H"],
                    help="預設看 4H 和 2H（2H 由 1H 合成）；60M（1H）回測是負期望值，要看可加上")
     p.add_argument("--symbols", nargs="*", help="預設：市值前 100 名的幣，加上成交額夠的美股/商品")
