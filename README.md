@@ -100,6 +100,18 @@ python orderflow_oi_check.py --tf 4h     # 持倉量 × 價格的擴大參數表
 （`fapi.binance.com` 擋 GitHub Actions 的美國伺服器），只有最近 30 天。網站上的回測數字用
 `python orderflow_backtest.py --site-stats` 重算。
 
+## BTC 長期定投（DCA）研究
+
+比較「等低點才買」和每天固定金額定投，同樣的總資金、沒買的錢算現金。BTC 日 K 用幣安現貨（2017-08 起），
+更早的用 CoinMarketCap 補（`grid_trading/spot_history.py`）。
+
+```bash
+python dca_backtest.py     # 60 條規則 × 分段期間 × 滾動 2/4 年視窗，結果在 output/dca/
+```
+
+結論（2026-10-13）：日 RSI<30、200 日均線、EMA169、MACD 這類「等低點才買」大多輸給每天定投；
+平常照買、ahr999>1.2（過熱）時暫停存錢、回到 1.2 以下再一次買掉，4 年視窗全部小贏（中位數約 +2%）。
+
 **觀察組都不推播：** 策略有 `tag`（SMC觀察組、訂單流觀察組）的訊號只出現在網站和通知中心，
 不送 Telegram，也不跳瀏覽器通知。只有 vegas_trend 4H / 2H 會推播。
 
