@@ -370,7 +370,7 @@ function renderList() {
   const counts = state.markets ? Object.entries(state.markets).map(([m, v]) => `${v.label} ${v.symbols}`).join("、") : `${state.symbols} 個`;
   $("foot").textContent = `監看 ${counts} · 週期 ${state.intervals.join("/")} · ` +
     `最後掃描 ${state.updated ? fmtTime(state.updated) : "—"}` +
-    (STATIC ? ` · 訊號每 15 分鐘由 GitHub 排程更新（整點收盤後 2 分鐘就掃到新訊號） · ${market === "crypto" && livePricesAt ? "現價來自 Binance 合約即時價" : "現價為掃描時的派網價格"}`
+    (STATIC ? ` · 訊號每 15 分鐘由 GitHub 排程更新（K 線收盤後約 1 分鐘推播新訊號） · ${market === "crypto" && livePricesAt ? "現價來自 Binance 合約即時價" : "現價為掃描時的派網價格"}`
       : " · 每 30 秒更新頁面");
 }
 
@@ -745,7 +745,7 @@ function renderNotes() {
     <div class="note ${!n.initial && n.created > seen ? "new" : ""}" data-id="${esc(n.signal_id)}">
       <div>${esc(n.text)}</div><div class="t num">${eventTime(n.signal_id, n.kind, n.time)} · ${KIND_TEXT[n.kind] || n.kind}</div></div>`).join("") ||
     `<div class="empty">還沒有通知</div>`;
-  $("notif-list").insertAdjacentHTML("afterbegin", `<div class="muted" style="padding:4px 0 8px">時間是台北時間（UTC+8），網站偵測到事件的時間；每 15 分鐘掃一次（整點後 2 分鐘起），止盈止損和實際觸價最多差 15 分鐘左右；新訊號在 K 線收盤後約 2 分鐘就會出現。</div>`);
+  $("notif-list").insertAdjacentHTML("afterbegin", `<div class="muted" style="padding:4px 0 8px">時間是台北時間（UTC+8），網站偵測到事件的時間；每 15 分鐘掃一次（:00、:15、:30、:45 後 15 秒），止盈止損和實際觸價最多差 15 分鐘左右；新訊號在 K 線收盤後約 1 分鐘推播，網站晚幾分鐘出現。</div>`);
   const perm = "Notification" in window ? Notification.permission : "unsupported";
   $("notif-perm").classList.toggle("hidden", perm === "granted" || perm === "unsupported");
 }

@@ -104,6 +104,7 @@ class Engine:
         self.previous: dict[str, dict] = {}
         self.carried = 0
         self.frames: dict[tuple[str, str], pd.DataFrame] = {}  # 這次掃描抓到的 K 線，畫圖和實盤紀錄直接沿用
+        self.prefetched: dict[tuple[str, str], pd.DataFrame] = {}  # 別的 Engine 剛抓好的 K 線，掃描時不再抓一次
         self.strategies = {s.name: s for s in strategies}
         self.symbols = symbols
         self.intervals = intervals
@@ -125,10 +126,14 @@ class Engine:
         return self._local.api
 
     def klines_many(self, jobs: list[tuple[str, str]], bars: int = 1000) -> dict[tuple[str, str], pd.DataFrame]:
-        """同時抓多個（symbol, interval）的 K 線；SCAN_BARS 裡有的週期改用那個根數。"""
+        """同時抓多個（symbol, interval）的 K 線；SCAN_BARS 裡有的週期改用那個根數。prefetched 裡完整的直接用。"""
+        def get(j):
+            df = self.prefetched.get(j)
+            if df is not None and not df.attrs.get("incomplete"):
+                return df
+            return fetch_klines(self.client(), j[0], j[1], SCAN_BARS.get(j[1], bars))
         with ThreadPoolExecutor(self.workers) as ex:
-            return dict(zip(jobs, ex.map(
-                lambda j: fetch_klines(self.client(), j[0], j[1], SCAN_BARS.get(j[1], bars)), jobs)))
+            return dict(zip(jobs, ex.map(get, jobs)))
 
     def klines(self, symbol: str, interval: str, bars: int = 1000) -> pd.DataFrame:
         """先用這次掃描抓到的 K 線（省一次請求），沒有才去抓。"""
