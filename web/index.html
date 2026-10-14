@@ -25,6 +25,8 @@
       <button class="mtab" data-market="stock">美股 <span></span></button>
       <button class="mtab" data-market="commodity">商品 <span></span></button>
     </div>
+    <div class="tabs ivtabs hidden" id="grouptabs"></div>
+    <div class="tabs ivtabs hidden" id="ivtabs"></div>
     <div id="stats" class="panel stats"></div>
     <div class="tabs">
       <button class="tab active" data-tab="OPEN">進行中 <span id="n-open"></span></button>
@@ -53,12 +55,19 @@
       <div id="more" class="more hidden">
         <label><input type="checkbox" id="opt-levels" checked> 顯示 TP / SL 線</label>
         <label><input type="checkbox" id="opt-emas" checked> 顯示均線</label>
+        <label><input type="checkbox" id="opt-ind" checked> 顯示 RSI / MACD</label>
         <div id="legend" class="legend"></div>
       </div>
       <div class="live-line"><span id="live-dot" class="dot"></span> <b>即時現價</b>
         <span class="muted" id="live-hint">點「最新價格」開啟即時更新</span></div>
       <div class="kinfo" id="kinfo"></div>
       <div id="chart"></div>
+      <div id="panes" class="panes">
+        <div class="pane-tag">RSI(14)　<i style="--c:#22c58b">54–70 做多</i>　<i style="--c:#f0697a">30–46 做空</i></div>
+        <div id="rsi-chart" class="sub-chart rsi"></div>
+        <div class="pane-tag">MACD(12,26,9)　<i style="--c:#4fb3d9">DIF</i>　<i style="--c:#e6c35c">DEA</i>　柱狀體</div>
+        <div id="macd-chart" class="sub-chart"></div>
+      </div>
     </div>
     <div class="panel" id="detail-levels"></div>
   </section>

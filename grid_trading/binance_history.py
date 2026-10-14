@@ -33,6 +33,9 @@ SYMBOLS = {
     "RENDER": ["RNDRUSDT", "RENDERUSDT"],
 }
 COLUMNS = ["time", "open", "high", "low", "close", "volume"]
+# K 線月檔的第 8~11 欄：成交額、成交筆數、主動買入量、主動買入額（訂單流研究用）
+FLOW_COLUMNS = COLUMNS + ["quote_volume", "trades", "taker_buy_volume", "taker_buy_quote"]
+_FLOW_USECOLS = [0, 1, 2, 3, 4, 5, 7, 8, 9, 10]
 
 
 def binance_symbols(coin: str) -> list[str]:
@@ -54,7 +57,7 @@ def _months(symbol: str, interval: str, session: requests.Session) -> list[str]:
     return keys[start:]
 
 
-def _read_zip(key: str, session: requests.Session) -> pd.DataFrame:
+def _read_zip(key: str, session: requests.Session, flow: bool = False) -> pd.DataFrame:
     for _ in range(3):
         try:
             resp = session.get(FILES + key, timeout=60)
@@ -66,7 +69,10 @@ def _read_zip(key: str, session: requests.Session) -> pd.DataFrame:
         raise RuntimeError(f"download failed: {key}")
     with zipfile.ZipFile(io.BytesIO(resp.content)) as z:
         raw = z.read(z.namelist()[0]).decode()
-    df = pd.read_csv(io.StringIO(raw), header=None, usecols=range(6), names=COLUMNS)
+    if flow:
+        df = pd.read_csv(io.StringIO(raw), header=None, usecols=_FLOW_USECOLS, names=FLOW_COLUMNS)
+    else:
+        df = pd.read_csv(io.StringIO(raw), header=None, usecols=range(6), names=COLUMNS)
     df = df[pd.to_numeric(df["time"], errors="coerce").notna()]  # 新的檔案有標題列
     df = df.astype(float)
     df.loc[df["time"] > 1e14, "time"] /= 1000  # 少數檔案用微秒
@@ -74,18 +80,22 @@ def _read_zip(key: str, session: requests.Session) -> pd.DataFrame:
     return df
 
 
-def fetch_binance(coin: str, interval: str = "1h", refresh: bool = False) -> pd.DataFrame:
-    """回傳幣安合約的完整月檔 K 線（interval 用幣安的寫法：1h、4h、1d…），time 為 UTC。"""
-    path = CACHE_DIR / f"{coin}_{interval}.csv.gz"
+def fetch_binance(coin: str, interval: str = "1h", refresh: bool = False, flow: bool = False) -> pd.DataFrame:
+    """回傳幣安合約的完整月檔 K 線（interval 用幣安的寫法：1h、4h、1d…），time 為 UTC。
+
+    flow=True 時多留成交額、筆數和主動買入量（FLOW_COLUMNS），另存在 {幣}_{週期}_flow.csv.gz。
+    """
+    name = f"{interval}_flow" if flow else interval
+    path = CACHE_DIR / f"{coin}_{name}.csv.gz"
     if path.exists() and not refresh:
-        return load(coin, interval)
+        return load(coin, name)
     session = requests.Session()
     parts = []
     for sym in binance_symbols(coin):
         keys = _months(sym, interval, session)
         if keys:
             with ThreadPoolExecutor(8) as ex:
-                parts += list(ex.map(lambda k: _read_zip(k, session), keys))
+                parts += list(ex.map(lambda k: _read_zip(k, session, flow), keys))
     if not parts:
         return pd.DataFrame()
     df = clean(pd.concat(parts))
@@ -93,7 +103,7 @@ def fetch_binance(coin: str, interval: str = "1h", refresh: bool = False) -> pd.
     tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp.gz")
     df.to_csv(tmp, index=False)
     os.replace(tmp, path)
-    return load(coin, interval)
+    return load(coin, name)
 
 
 def clean(df: pd.DataFrame) -> pd.DataFrame:

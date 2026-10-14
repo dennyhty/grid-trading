@@ -1,11 +1,11 @@
-# 每 5 分鐘掃描一次訊號，把網頁和資料直接發佈到 GitHub Pages。
-# 只用派網公開行情，不需要任何金鑰。
+# 每 15 分鐘掃描一次訊號，把網頁和資料直接發佈到 GitHub Pages。
+# 只用公開行情（派網 K 線；訂單流觀察組另外讀幣安的公開持倉量），不需要任何金鑰。
 # 需要的設定：Settings → Pages → Source 選「GitHub Actions」。
 name: 訊號網頁
 
 on:
   schedule:
-    - cron: "*/5 * * * *"   # 每 5 分鐘（GitHub 最短就是 5 分鐘），排程常會延遲幾分鐘
+    - cron: "2,17,32,47 * * * *"   # 每 15 分鐘，K 線整點收盤後 2 分鐘（實際由「訊號定時器」觸發，GitHub 排程常延遲或不觸發）
   workflow_dispatch:
     inputs:
       test_telegram:
@@ -34,19 +34,23 @@ jobs:
           python-version: "3.12"
           cache: pip
       - run: pip install -r requirements.txt
-      - name: 取得上一次的通知紀錄（從目前的網站）
+      # 通知紀錄、訊號、實盤紀錄都從目前的網站接著用。只有 404（網站還沒有這個檔）才從頭開始；
+      # 其他錯誤就不部署，免得通知紀錄被清空（這一輪的新訊號會被當成「第一次啟動」而不推播）、
+      # 或下一輪把同樣的通知再推一次。網址加時間參數，避免拿到 CDN 快取的舊版。
+      - name: 取得上一次的通知紀錄、訊號、實盤紀錄（從目前的網站）
         run: |
           owner="${GITHUB_REPOSITORY%/*}"; repo="${GITHUB_REPOSITORY#*/}"
-          curl -fsS "https://${owner}.github.io/${repo}/data/notifications.json" -o previous_notifications.json \
-            || echo "[]" > previous_notifications.json
-      - name: 取得上一次的實盤紀錄（拿不到就不部署，免得紀錄被清空）
-        run: |
-          owner="${GITHUB_REPOSITORY%/*}"; repo="${GITHUB_REPOSITORY#*/}"
-          code=$(curl -sS -o previous_ledger.json -w '%{http_code}' "https://${owner}.github.io/${repo}/data/ledger.json")
-          if [ "$code" = "404" ]; then echo "[]" > previous_ledger.json
-          elif [ "$code" != "200" ]; then echo "讀取 ledger.json 失敗：HTTP $code"; exit 1; fi
+          fetch() {
+            code=$(curl -sS --retry 3 --retry-delay 5 -H 'Cache-Control: no-cache' -o "$2" -w '%{http_code}' \
+              "https://${owner}.github.io/${repo}/data/$1?t=$(date +%s)") || code="curl 失敗"
+            if [ "$code" = "404" ]; then echo "$3" > "$2"
+            elif [ "$code" != "200" ]; then echo "讀取 $1 失敗：HTTP $code"; exit 1; fi
+          }
+          fetch notifications.json previous_notifications.json '[]'
+          fetch state.json previous_state.json '{}'
+          fetch ledger.json previous_ledger.json '[]'
       - name: 掃描訊號、產生網站
-        run: python signal_snapshot.py --out site --previous previous_notifications.json --ledger previous_ledger.json
+        run: python signal_snapshot.py --out site --previous previous_notifications.json --ledger previous_ledger.json --previous-state previous_state.json
       - name: 整理要推到 Telegram 的新通知
         run: python signal_telegram.py outbox site/data previous_notifications.json outbox.json
       - uses: actions/upload-pages-artifact@v3
@@ -76,7 +80,7 @@ jobs:
   telegram:
     needs: deploy
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
         with:

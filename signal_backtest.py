@@ -19,11 +19,12 @@ import pandas as pd
 
 from grid_trading import signals
 from grid_trading.binance_history import fetch_binance
-from grid_trading.history import fetch_history
+from grid_trading.history import fetch_history, resample
 from grid_trading.markets import COMMODITY, CRYPTO, STOCK, classify
 from grid_trading.pionex import PionexPublic
 from grid_trading.universe import TOP100, perp_symbols
-from grid_trading.signals.evaluate import group_summary, split_summary, trades_for
+from grid_trading.signals.engine import INTERVAL_MS, SYNTHETIC
+from grid_trading.signals.evaluate import split_summary, trades_for
 
 STATS_PATH = Path("stats/signal_stats.json")
 BINANCE_INTERVALS = {"60M": "1h", "4H": "4h"}
@@ -91,10 +92,13 @@ def main() -> int:
         days = args.days_4h if interval == "4H" else args.days
         rows = []
         for sym in symbols:
+            base, k = SYNTHETIC.get(interval, (interval, 1))
             if args.source == "binance":
-                df = fetch_binance(sym.split("_")[0], BINANCE_INTERVALS[interval])
+                df = fetch_binance(sym.split("_")[0], BINANCE_INTERVALS[base])
             else:
-                df = fetch_history(sym, interval, days)
+                df = fetch_history(sym, base, days)
+            if k > 1 and len(df):  # 2H：和實盤一樣由 1H 合成
+                df = resample(df, f"{INTERVAL_MS[interval] // 3_600_000}h", origin="epoch")
             if len(df) < strat.min_bars + 50:
                 continue
             t = trades_for(strat, df, sym, interval, args.fee)
@@ -102,9 +106,6 @@ def main() -> int:
             print(f"  {interval} {sym}: {len(df)} 根，{len(t)} 筆交易", file=sys.stderr)
         trades = pd.DataFrame(rows)
         summary = split_summary(trades, args.risk)
-        groups = group_summary(trades)
-        if groups:
-            summary["rsi_groups"] = groups
         summary.update({"market": args.market, "source": args.source, "strategy": strat.name, "title": strat.title, "interval": interval, "params": params,
                         "fee": args.fee, "generated": datetime.now(timezone.utc).isoformat(timespec="seconds")})
         stats.setdefault(strat.name, {})[stats_key(args.market, interval, args.source)] = summary

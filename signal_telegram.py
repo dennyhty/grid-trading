@@ -35,7 +35,7 @@ def _fmt(x: float) -> str:
 
 
 def build_outbox(data_dir: Path, previous_path: Path) -> list[str]:
-    """這次新增、而且不是第一次啟動補上的通知，轉成 Telegram 訊息文字。"""
+    """這次新增、而且不是第一次啟動補上的通知，轉成 Telegram 訊息文字。觀察組（策略有 tag）的通知不送。"""
     previous = _load(previous_path)
     if not previous:
         return []  # 拿不到上一次的紀錄就不送，免得把舊通知全部重送一遍
@@ -43,18 +43,19 @@ def build_outbox(data_dir: Path, previous_path: Path) -> list[str]:
     notes = _load(data_dir / "notifications.json") or []
     state = _load(data_dir / "state.json") or {}
     signals = {s["id"]: s for s in state.get("signals", [])}
+    observe = {name for name, st in (state.get("strategies") or {}).items() if st.get("tag")}
     out = []
     for n in notes:
         if n["id"] in seen or n.get("initial"):
             continue
+        strategy = (n["signal_id"].split("|") + ["", "", ""])[2]  # id 是「幣|週期|策略|時間」
+        if strategy in observe:
+            continue  # 觀察組（SMC、訂單流…）只記錄在網站上，不推播
         text = n["text"]
         s = signals.get(n["signal_id"])
         if n["kind"] == "NEW" and s:
             tps = " / ".join(f"TP{i} {_fmt(p)}" for i, p in enumerate(s["tps"], 1))
             text += f"\n止損 {_fmt(s['sl'])}\n{tps}"
-            strict = (s.get("info") or {}).get("strict_rsi")
-            if strict is not None:
-                text += "\nRSI 收緊觀察組：" + ("也會進場" if strict else "會剔除（只有現行 RSI 範圍才進）")
         out.append(text)
     return out
 
@@ -69,13 +70,27 @@ def send(messages: list[str], token: str, chat_id: str) -> tuple[int, int]:
     for i, text in enumerate(messages):
         body = urllib.parse.urlencode({"chat_id": chat_id, "text": f"{text}\n{SITE_URL}",
                                        "disable_web_page_preview": "true"}).encode()
-        try:
-            urllib.request.urlopen(url, body, timeout=20).read()
-        except Exception as e:  # 錯誤訊息不含 token（只印類型和狀態碼）
-            failed += 1
-            print(f"第 {i + 1} 則送出失敗：{type(e).__name__} {getattr(e, 'code', '')}", file=sys.stderr)
-        time.sleep(1.1)  # Telegram 對同一個聊天大約每秒 1 則
+        for attempt in range(3):  # 這一輪沒送到，下一輪也不會再送，所以失敗時等一下重試
+            try:
+                urllib.request.urlopen(url, body, timeout=20).read()
+                break
+            except Exception as e:  # 錯誤訊息不含 token（只印類型和狀態碼）
+                code = getattr(e, "code", "")
+                print(f"第 {i + 1} 則送出失敗：{type(e).__name__} {code}", file=sys.stderr)
+                if attempt == 2 or (isinstance(code, int) and 400 <= code < 500 and code != 429):
+                    failed += 1  # 400/401/403 之類重試也沒用
+                    break
+                time.sleep(_retry_after(e) if code == 429 else 3)
+        time.sleep(1.1)  # Telegram 對同一個聊天大約每秒 1 則（群組每分鐘 20 則，超過會回 429）
     return len(messages) - failed, failed
+
+
+def _retry_after(e: Exception) -> float:
+    """Telegram 回 429 時，回應裡的 parameters.retry_after 是要等幾秒。"""
+    try:
+        return min(60.0, float(json.loads(e.read())["parameters"]["retry_after"]) + 1)
+    except Exception:
+        return 5.0
 
 
 def main(argv: list[str]) -> int:

@@ -160,3 +160,46 @@ def test_binance_clean_drops_delisted_flat_bars_and_keeps_the_last_listing():
     new = pd.DataFrame({"time": [(100 + i) * day for i in range(3)], "volume": [1, 1, 1]})
     out = clean(pd.concat([old, new]).assign(open=1.0, high=1.0, low=1.0, close=1.0))
     assert out["time"].tolist() == [100 * day, 101 * day, 102 * day]
+
+
+def test_half_at_tp1_then_trailing_stop():
+    # 1R 平一半，之後追蹤距離 15：最高 140 → 追蹤止損 125，回落到 124 出場
+    s = Signal("X_USDT_PERP", "4H", LONG, T0, 100.0, 90.0, [110.0], "test", exit={"portions": [0.5], "trail": 15.0})
+    r = track(s, candles([(111, 99, 110), (140, 120, 135), (138, 124, 126)]), fee=0)
+    kinds = [e.kind for e in r.events]
+    assert kinds == ["TP1", "STOP_MOVED", "TRAIL_MOVED", "TRAIL_EXIT"]
+    assert r.events[2].price == pytest.approx(125.0)
+    assert r.realized_r == pytest.approx(0.5 * 1 + 0.5 * 2.5)
+
+
+def test_trailing_never_below_breakeven():
+    s = Signal("X_USDT_PERP", "4H", LONG, T0, 100.0, 90.0, [110.0], "test", exit={"portions": [0.5], "trail": 15.0})
+    r = track(s, candles([(111, 101, 110), (105, 99, 100)]), fee=0)
+    assert [e.kind for e in r.events] == ["TP1", "STOP_MOVED", "BE_EXIT"]
+    assert r.realized_r == pytest.approx(0.5)
+
+
+def test_vegas_exit_plans_by_interval():
+    v = get("vegas_trend")
+    assert v.exit_plan("4H")["trail_atr"] == 3.0
+    assert v.exit_plan("2H")["tp_r"] == [1.0, 3.0, 5.0]
+    assert v.exit_plan("2H")["trail_atr"] == 3.0 and sum(v.exit_plan("2H")["portions"]) == 0.75
+    assert v.exit_plan("60M") is None
+
+
+def test_vegas_2h_skips_signals_with_high_adx():
+    rng = np.random.default_rng(0)
+    n = 3000
+    close = 100 * np.exp(np.cumsum(0.001 * np.sin(np.arange(n) / 150) + 0.008 * rng.standard_normal(n)))
+    op = np.r_[close[0], close[:-1]]
+    wick = 0.003 * np.abs(rng.standard_normal(n))
+    df = pd.DataFrame({"close": close, "open": op, "high": np.maximum(op, close) * (1 + wick),
+                       "low": np.minimum(op, close) * (1 - wick), "volume": 1.0})
+    df["time"] = pd.date_range(T0, periods=n, freq="2h", tz="UTC")
+    v = get("vegas_trend")
+    every = v.scan(df, "X", "4H")  # 4H 沒有 ADX 過濾，拿來當全部的訊號
+    adx = pd.Series(ind.adx(df).to_numpy(), index=df["time"] + pd.Timedelta("2h"))
+    high = [s.time for s in every if adx[s.time] >= 24]
+    assert high and len(high) < len(every)
+    assert [s.time for s in v.scan(df, "X", "2H")] == [s.time for s in every if s.time not in high]
+    assert all(abs(s.info["adx"] - adx[s.time]) < 0.05 for s in every)

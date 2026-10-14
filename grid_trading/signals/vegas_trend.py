@@ -1,13 +1,24 @@
 """第一個策略：維加斯通道定方向，MACD 翻轉 + RSI 確認進場。
 
 - 趨勢：收盤和 EMA12 都在通道（EMA144/169）上方，且 EMA144 > EMA169 → 只找多單；反之只找空單。
-- 進場：MACD 柱狀體由負翻正（多）或由正翻負（空），RSI 在 50~70（多）或 30~50（空），
+- 進場：MACD 柱狀體由負翻正（多）或由正翻負（空），RSI 在 54~70（多）或 30~46（空），
   而且價格離通道不超過 max_ext_atr 倍 ATR（追太高不進）。
 - 停損：進場價 ∓ sl_atr 倍 ATR，風險記為 1R。
-- 停利：TP1/TP2/TP3 = 1R / 2R / 3R（倍數可調）。
+- 停利（2026-10-13 起依週期不同，見 EXIT_PLANS）：
+  - 4H：1R 平一半，TP1 後止損移到保本，剩下一半用 3 倍 ATR 追蹤止損（從進場後最高/最低價往回算）。
+  - 2H：TP 1R / 3R / 5R 各平 1/4，TP1 後止損移到保本、TP2 後移到 TP1；最後 1/4 用 3 倍 ATR 追蹤止損
+    （2026-10-13 晚上加上，原本是 1R/3R/5R 各平 1/3：幣安每筆 +0.105R → +0.130R，兩段時期都比較好）。
+  - 其他週期：TP 1R / 2R / 3R 各平 1/3。
+  幣安 2020 年起回測（exit_backtest.py）：4H 每筆 +0.112R → +0.153R，2H +0.079R → +0.105R，
+  2020-23 和 2024 年後兩段都比較好，勝率仍約 55%。
 
-觀察組：每個訊號另外標記 info["strict_rsi"]，表示 RSI 收緊成多單 54~70、空單 30~46 時是否也會進場。
-只是標記，不影響進場；用來在實盤累積兩組的成績再決定要不要換。
+RSI 範圍在 2026-10-12 從 50~70 / 30~50 收緊成 54~70 / 30~46：幣安 2H、4H 回測裡，不論用 2020~2023 年
+挑、2024 年後驗證，或反過來，收緊後每筆期望值和 Sharpe 都比較好，被剔除的那段 RSI 平均約 0R。
+
+2H 從 2026-10-13 起：訊號 K 棒的 ADX(14) ≥ 24 不做（MAX_ADX）。幣安 2020 年起，這些單約佔 2H 的 16%，
+2020-23 和 2024 年後每筆都約 0R；跳過後 Sharpe 1.39 → 1.59、勝率 53.8% → 54.6%，7 年裡 6 年比較好。
+派網 2H 只有 2025-09 起的資料，這段沒有改善；4H 用同樣規則也沒有幫助，所以只用在 2H
+（entry_research.py，報告 report_vegas_trend_entry_20261013.md）。
 """
 
 from __future__ import annotations
@@ -23,21 +34,32 @@ class VegasTrend(Strategy):
     name = "vegas_trend"
     title = "維加斯通道順勢 + MACD/RSI"
     description = ("價格在 EMA144/169 通道上方且通道向上時只做多、下方向下時只做空；"
-                   "MACD 柱翻轉且 RSI 同向時進場。停損 ATR 倍數，TP 為 1R/2R/3R。")
+                   "MACD 柱翻轉且 RSI 同向時進場。停損 1.5 倍 ATR；4H 在 1R 平一半、其餘 3 ATR 追蹤止損，"
+                   "2H 的 TP 為 1R/3R/5R 各平 1/4、最後 1/4 用 3 ATR 追蹤止損，且 ADX ≥ 24 時不做。")
     chart_emas = {"EMA12": 12, "EMA144": 144, "EMA169": 169, "EMA576": 576, "EMA676": 676}
     min_bars = 200
+    EXIT_PLANS = {
+        "4H": {"tp_r": [1.0], "portions": [0.5], "trail_atr": 3.0},
+        "2H": {"tp_r": [1.0, 3.0, 5.0], "portions": [0.25, 0.25, 0.25], "trail_atr": 3.0},
+    }
+    # 這些週期的訊號 K 棒 ADX(14) 達到門檻就不做
+    MAX_ADX = {"2H": 24.0}
 
     def __init__(self, sl_atr: float = 1.5, tp_r: tuple[float, float, float] = (1.0, 2.0, 3.0),
-                 max_ext_atr: float = 3.0, rsi_long: tuple[float, float] = (50, 70),
-                 rsi_short: tuple[float, float] = (30, 50),
-                 strict_rsi_long: tuple[float, float] = (54, 70), strict_rsi_short: tuple[float, float] = (30, 46)):
+                 max_ext_atr: float = 3.0, rsi_long: tuple[float, float] = (54, 70),
+                 rsi_short: tuple[float, float] = (30, 46)):
         self.sl_atr = sl_atr
         self.tp_r = tuple(tp_r)
         self.max_ext_atr = max_ext_atr
         self.rsi_long = rsi_long
         self.rsi_short = rsi_short
-        self.strict_rsi_long = strict_rsi_long
-        self.strict_rsi_short = strict_rsi_short
+
+    def exit_plan(self, interval: str) -> dict | None:
+        return self.EXIT_PLANS.get(interval)
+
+    def accept(self, df: pd.DataFrame, i: int, interval: str) -> bool:
+        limit = self.MAX_ADX.get(interval)
+        return limit is None or not df["adx"].iat[i] >= limit
 
     def prepare(self, df: pd.DataFrame) -> pd.DataFrame:
         df = df.copy()
@@ -49,6 +71,7 @@ class VegasTrend(Strategy):
         m = ind.macd(c)
         df["macd"], df["macd_signal"], df["hist"] = m["macd"], m["signal"], m["hist"]
         df["atr"] = ind.atr(df)
+        df["adx"] = ind.adx(df)
         return df
 
     def candidates(self, df: pd.DataFrame):
@@ -69,6 +92,7 @@ class VegasTrend(Strategy):
             "rsi": round(float(r.rsi), 2),
             "macd": float(r.macd), "macd_signal": float(r.macd_signal), "hist": float(hist),
             "atr": float(r.atr), "ema144": float(r.ema144), "ema169": float(r.ema169),
+            "adx": round(float(r.adx), 1) if pd.notna(r.adx) else None,
             "candle": {"open": float(r.open), "high": float(r.high), "low": float(r.low),
                        "close": float(r.close), "time": int(r.time.timestamp() * 1000)},
         }
@@ -80,13 +104,11 @@ class VegasTrend(Strategy):
         if (up and prev_hist <= 0 < hist and self.rsi_long[0] <= r.rsi <= self.rsi_long[1]
                 and r.close - top <= self.max_ext_atr * r.atr):
             info["reason"] = "價格在維加斯通道上方、通道向上；MACD 柱翻正；RSI 偏多未過熱"
-            info["strict_rsi"] = bool(self.strict_rsi_long[0] <= r.rsi <= self.strict_rsi_long[1])
             return LONG, r.close - risk, [r.close + k * risk for k in self.tp_r], info
 
         down = r.close < bottom and r.ema12 < bottom and r.ema144 < r.ema169
         if (down and prev_hist >= 0 > hist and self.rsi_short[0] <= r.rsi <= self.rsi_short[1]
                 and bottom - r.close <= self.max_ext_atr * r.atr):
             info["reason"] = "價格在維加斯通道下方、通道向下；MACD 柱翻負；RSI 偏空未超賣"
-            info["strict_rsi"] = bool(self.strict_rsi_short[0] <= r.rsi <= self.strict_rsi_short[1])
             return SHORT, r.close + risk, [r.close - k * risk for k in self.tp_r], info
         return None
