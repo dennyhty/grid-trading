@@ -26,6 +26,7 @@ from __future__ import annotations
 import pandas as pd
 
 from .. import indicators as ind
+from ..markets import COMMODITY, STOCK
 from .strategy import LONG, SHORT, Strategy, register
 
 
@@ -33,6 +34,8 @@ from .strategy import LONG, SHORT, Strategy, register
 class VegasTrend(Strategy):
     name = "vegas_trend"
     title = "維加斯通道順勢 + MACD/RSI"
+    # 美股、商品只有約一年資料、看不出優勢，2026-10-14 起改成觀察組（不推播）
+    market_tags = {STOCK: "維加斯觀察組", COMMODITY: "維加斯觀察組"}
     description = ("價格在 EMA144/169 通道上方且通道向上時只做多、下方向下時只做空；"
                    "MACD 柱翻轉且 RSI 同向時進場。停損 1.5 倍 ATR；4H 在 1R 平一半、其餘 3 ATR 追蹤止損，"
                    "2H 的 TP 為 1R/3R/5R 各平 1/4、最後 1/4 用 3 ATR 追蹤止損，且 ADX ≥ 24 時不做。")

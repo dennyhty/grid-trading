@@ -49,8 +49,8 @@ def build_outbox(data_dir: Path, previous_path: Path) -> list[str]:
         if n["id"] in seen or n.get("initial"):
             continue
         strategy = (n["signal_id"].split("|") + ["", "", ""])[2]  # id 是「幣|週期|策略|時間」
-        if strategy in observe:
-            continue  # 觀察組（SMC、訂單流…）只記錄在網站上，不推播
+        if n.get("observe") or strategy in observe:
+            continue  # 觀察組（SMC、訂單流、美股/商品的維加斯…）只記錄在網站上，不推播
         text = n["text"]
         s = signals.get(n["signal_id"])
         if n["kind"] == "NEW" and s:

@@ -264,13 +264,14 @@ class Engine:
             pair = s["name"] if s["market"] != "crypto" else s["symbol"].replace("_USDT_PERP", "/USDT")
             side = "做多" if s["side"] == "LONG" else "做空"
             strat = self.strategies.get(s.get("strategy", ""))
-            if strat is not None and strat.tag:
-                pair = f"［{strat.tag}］{pair}"
+            tag = strat.tag_for(s["market"]) if strat is not None else ""
+            if tag:
+                pair = f"［{tag}］{pair}"
             quiet = first_run
             if old is None and not any(n["signal_id"] == sid and n["kind"] == "NEW" for n in self.notifications):
                 # 第一次出現時已經是 3 根 K 線以前的訊號（例如剛加上的新週期補掃到的舊訊號）：記下來但不推播
                 quiet = quiet or now - s["time"] > 3 * INTERVAL_MS[s["interval"]]
-                self._push(sid, "NEW", s["time"], f"{pair} {s['label']} {side}訊號 @ {s['price']:.6g}", quiet)
+                self._push(sid, "NEW", s["time"], f"{pair} {s['label']} {side}訊號 @ {s['price']:.6g}", quiet, bool(tag))
             # 用通知 id 比對哪些事件已經通知過，不用「第幾個事件」：出場規則改了、事件清單跟著變時，
             # 用數量比對會漏推或推錯
             count: Counter = Counter()
@@ -281,15 +282,18 @@ class Engine:
                     have[nid] += 1
                     # 比已通知的事件還早：是出場規則改了、重新追蹤補出來的舊事件，只記錄不推播
                     late = e["time"] < latest.get(sid, 0)
-                    self._push(sid, e["kind"], e["time"], f"{pair} {s['label']} {side}：{e['text']}", quiet or late)
+                    self._push(sid, e["kind"], e["time"], f"{pair} {s['label']} {side}：{e['text']}", quiet or late,
+                               bool(tag))
         # 只保留最近 300 則，但網站上還在的訊號，它的通知全部留著（不然下次會當成沒通知過）
         cut = len(self.notifications) - 300
         self.notifications = [n for i, n in enumerate(self.notifications) if i >= cut or n["signal_id"] in found]
         self._save_notifications()
 
-    def _push(self, sid: str, kind: str, t: int, text: str, quiet: bool) -> None:
+    def _push(self, sid: str, kind: str, t: int, text: str, quiet: bool, observe: bool = False) -> None:
+        """observe：觀察組的通知，只記在網站上，不送 Telegram、不跳瀏覽器通知。"""
         self.notifications.append({"id": f"{sid}|{kind}|{t}", "signal_id": sid, "kind": kind, "time": t,
-                                   "created": int(time.time() * 1000), "text": text, "initial": quiet})
+                                   "created": int(time.time() * 1000), "text": text, "initial": quiet,
+                                   "observe": observe})
 
     def _load_notifications(self) -> list[dict]:
         p = self.state_dir / "notifications.json"
@@ -323,6 +327,7 @@ class Engine:
         for s in sigs:
             s["live"] = prices.get(s["symbol"])
         strategies = {n: {"title": s.title, "description": s.description, "tag": s.tag,
+                          "market_tags": dict(s.market_tags),
                           "intervals": [label(i) for i in s.intervals] if s.intervals else None,
                           "markets": list(s.markets) if s.markets else None}
                       for n, s in self.strategies.items()}

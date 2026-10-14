@@ -136,7 +136,7 @@ python -m research.dca_backtest     # 60 條規則 × 分段期間 × 滾動 2/4
 平常照買、ahr999>1.2（過熱）時暫停存錢、回到 1.2 以下再一次買掉，4 年視窗全部小贏（中位數約 +2%）。
 
 **觀察組都不推播：** 策略有 `tag`（SMC觀察組、訂單流觀察組）的訊號只出現在網站和通知中心，
-不送 Telegram，也不跳瀏覽器通知。只有 vegas_trend 4H / 2H 會推播。
+不送 Telegram，也不跳瀏覽器通知。只有加密貨幣的 vegas_trend 4H / 2H 會推播；美股、商品的 vegas_trend 從 2026-10-14 起也是觀察組（`Strategy.market_tags`）。
 
 ### 加新策略
 

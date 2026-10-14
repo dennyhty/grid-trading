@@ -29,8 +29,10 @@ let market = (() => { try { return localStorage.getItem("market") || "crypto"; }
 let ivFilter = (() => { try { return localStorage.getItem("iv") || "ALL"; } catch { return "ALL"; } })();
 // 策略 / 觀察組：策略有 tag（例如「SMC觀察組」「訂單流觀察組」）就算觀察組，沒有 tag 的是正式策略
 let group = (() => { try { return localStorage.getItem("group") || "strategy"; } catch { return "strategy"; } })();
-const isObserve = (name) => !!(state.strategies[name] || {}).tag;
-const inGroup = (name) => isObserve(name) === (group === "observe");
+/** 策略在某個類別的標籤；有標籤就是觀察組。美股、商品的維加斯用 market_tags 另外標成觀察組。 */
+const tagOf = (name, m) => { const st = state.strategies[name] || {}; return (st.market_tags || {})[m] ?? st.tag ?? ""; };
+const isObserve = (name, m = market) => !!tagOf(name, m);
+const inGroup = (name, m = market) => isObserve(name, m) === (group === "observe");
 const ivOf = (label) => (label === "1H" ? "60M" : label);
 /** 週期篩選列。瀏覽器快取了舊版 index.html 時沒有這個元素，就自己補在市場分頁下面，免得整頁的程式停住。 */
 /** 策略 / 觀察組 切換列（放在市場分頁下面；舊版 index.html 沒有，所以由程式建立）。 */
@@ -264,8 +266,8 @@ function renderStats() {
         ${a.expectancy_r <= 0 ? `<p class="warn">期望值是負的：照這個策略在${MARKET_LABEL[market]}上交易，長期是虧錢的。</p>`
           : a.expectancy_r < 0.1 ? `<p class="warn">期望值接近 0，優勢很小、可能只是運氣。先用小資金或只觀察。</p>` : ""}
         <p class="warn">上面的總報酬和回撤，是每個訊號都照單跟、每筆止損最多賠「當下」總資金 ${a.risk_per_trade_pct}% 算出來的，賺了下一筆就下得大一點，所以是複利，不等於 筆數 × 期望值 × ${a.risk_per_trade_pct}%（每筆固定賠起始資金 ${a.risk_per_trade_pct}%、不複利的話是 ${pct(a.trades * a.expectancy_r * a.risk_per_trade_pct)}）${a.max_concurrent ? `；回測期間最多同時有 ${a.max_concurrent} 筆單在持倉，很多標的會一起出訊號、一起虧，所以回撤已經包含這些一起虧的單` : ""}。每筆賠得越多，回撤就成倍放大，建議每筆止損不超過總資金的 ${a.risk_per_trade_pct}%。</p>
-        ${st.tag ? `<p class="warn">${esc(st.tag)}：只記錄實盤結果、不推播，不建議照單下。把同一天、同方向的單算成一次賭注時，2024 年後的優勢接近 0，還不能當成已驗證的策略。</p>` : ""}
-        ${liveHtml(name, iv, st.tag ? a.expectancy_r : 0.07)}`);
+        ${tagOf(name, market) ? `<p class="warn">${esc(tagOf(name, market))}：只記錄實盤結果、不推播，不建議照單下。把同一天、同方向的單算成一次賭注時，2024 年後的優勢接近 0，還不能當成已驗證的策略。</p>` : ""}
+        ${liveHtml(name, iv, tagOf(name, market) ? a.expectancy_r : 0.07)}`);
     }
   }
   $("stats").innerHTML = parts.join("") ||
@@ -304,7 +306,7 @@ function statusText(s) {
 }
 
 function tagChip(s) {
-  const tag = (state.strategies[s.strategy] || {}).tag;
+  const tag = tagOf(s.strategy, mk(s));
   return tag ? `<span class="chip tag-chip">${esc(tag)}</span>` : "";
 }
 
@@ -336,9 +338,9 @@ function hiddenNote(inMarket) {
 
 function renderList() {
   if (ivFilter !== "ALL" && !state.intervals.map(ivOf).includes(ivFilter)) ivFilter = "ALL";
-  const hasObserve = Object.keys(state.strategies).some(isObserve);
+  const hasObserve = Object.keys(state.strategies).some((n) => ["crypto", "stock", "commodity"].some((m) => isObserve(n, m)));
   if (!hasObserve) group = "strategy";
-  const openIn = (g, m) => state.signals.filter((s) => isObserve(s.strategy) === (g === "observe") && mk(s) === m
+  const openIn = (g, m) => state.signals.filter((s) => isObserve(s.strategy, m) === (g === "observe") && mk(s) === m
     && s.track.status === "OPEN").length;
   groupTabsEl().classList.toggle("hidden", !hasObserve);
   groupTabsEl().innerHTML = [["strategy", "策略"], ["observe", "觀察組"]].map(([g, name]) =>
@@ -712,7 +714,11 @@ function setLive(on) {
 function lastSeen() { try { return Number(localStorage.getItem("lastSeenNote") || 0); } catch { return 0; } }
 function setLastSeen(v) { try { localStorage.setItem("lastSeenNote", String(v)); } catch { /* 私密模式 */ } }
 
-const isObserveNote = (n) => isObserve(String(n.signal_id).split("|")[2]);
+const isObserveNote = (n) => {
+  if (n.observe != null) return n.observe;
+  const s = state.signals.find((x) => x.id === n.signal_id);  // 舊通知沒有 observe 欄位
+  return isObserve(String(n.signal_id).split("|")[2], s ? mk(s) : "crypto");
+};
 
 function handleNotifications() {
   const notes = state.notifications;
