@@ -205,3 +205,69 @@ def test_open_signal_dropped_by_a_rule_change_is_still_tracked(tmp_path, monkeyp
     assert sid in eng.signals and eng.signals[sid]["track"]["tps_hit"] == 1
     # 兩單新的都會和已經發出、還沒結束的那一單重疊，不出
     assert set(eng.signals) == {sid}
+
+
+def _pos(interval, t, side="LONG", status="OPEN", end=None, market="crypto", sym="BTC_USDT_PERP"):
+    sid = f"{sym}|{interval}|vegas_trend|{t // 1000}"
+    events = [{"kind": "SL", "time": end, "text": ""}] if status == "CLOSED" else []
+    return sid, {"id": sid, "symbol": sym, "interval": interval, "strategy": "vegas_trend", "market": market,
+                 "side": side, "time": t, "track": {"status": status, "events": events}}
+
+
+def _one_per_coin_engine(tmp_path, intervals=("4H", "2H")):
+    import pandas as pd
+    from grid_trading.signals import get
+    eng = Engine([get("vegas_trend")], [], list(intervals), state_dir=tmp_path)
+    return eng, pd.Timestamp.now(tz="UTC")
+
+
+def test_one_position_per_coin_and_side_across_2h_and_4h(tmp_path):
+    eng, now = _one_per_coin_engine(tmp_path)
+    t = int(now.timestamp() * 1000) - 10 * 3_600_000
+    h = 3_600_000
+    a_id, a = _pos("4H", t)                                     # 已經發出、還開著
+    eng.previous = {a_id: a}
+    b_id, b = _pos("2H", t + 2 * h)                             # 同幣同方向 → 不做
+    c_id, c = _pos("2H", t + 2 * h, sym="ETH_USDT_PERP")         # 別的幣 → 照做
+    d_id, d = _pos("2H", t + 4 * h, side="SHORT")                # 反方向 → 照做
+    e_id, e = _pos("2H", t + 2 * h, market="stock", sym="NVDAX_USDT_PERP")  # 觀察組不管
+    found = {a_id: a, b_id: b, c_id: c, d_id: d, e_id: e}
+    eng._one_per_coin(found, now)
+    assert set(found) == {a_id, c_id, d_id, e_id}
+    assert b_id in eng.blocked
+
+    # 擋住它的單出場、甚至離開掃描範圍以後，被擋掉的訊號也不會再出現
+    eng.previous = {c_id: c, d_id: d}
+    found = {b_id: b, c_id: c, d_id: d}
+    eng._one_per_coin(found, now)
+    assert b_id not in found
+
+
+def test_one_per_coin_ties_go_to_2h_and_closed_blockers_free_the_coin(tmp_path):
+    eng, now = _one_per_coin_engine(tmp_path)
+    t = int(now.timestamp() * 1000) - 20 * 3_600_000
+    a_id, a = _pos("4H", t)
+    b_id, b = _pos("2H", t)
+    found = {a_id: a, b_id: b}
+    eng._one_per_coin(found, now)
+    assert set(found) == {b_id}
+
+    eng2, _ = _one_per_coin_engine(tmp_path)
+    c_id, c = _pos("4H", t, status="CLOSED", end=t + 4 * 3_600_000)
+    d_id, d = _pos("2H", t + 6 * 3_600_000)
+    eng2.previous = {c_id: c}
+    found = {c_id: c, d_id: d}
+    eng2._one_per_coin(found, now)
+    assert set(found) == {c_id, d_id}
+
+
+def test_one_per_coin_uses_previous_signals_of_intervals_not_scanned(tmp_path):
+    # 收盤搶先掃描只掃 2H，4H 還開著的單從上一次的訊號來
+    eng, now = _one_per_coin_engine(tmp_path, intervals=("2H",))
+    t = int(now.timestamp() * 1000) - 10 * 3_600_000
+    a_id, a = _pos("4H", t)
+    b_id, b = _pos("2H", t + 4 * 3_600_000)
+    eng.previous = {a_id: a}
+    found = {b_id: b}
+    eng._one_per_coin(found, now)
+    assert found == {}

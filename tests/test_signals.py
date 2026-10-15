@@ -181,7 +181,7 @@ def test_trailing_never_below_breakeven():
 
 def test_vegas_exit_plans_by_interval():
     v = get("vegas_trend")
-    assert v.exit_plan("4H")["trail_atr"] == 3.0
+    assert v.exit_plan("4H") == v.exit_plan("2H")  # 2026-10-15 起 4H 和 2H 出場一樣
     assert v.exit_plan("2H")["tp_r"] == [1.0, 3.0, 5.0]
     assert v.exit_plan("2H")["trail_atr"] == 3.0 and sum(v.exit_plan("2H")["portions"]) == 0.75
     assert v.exit_plan("60M") is None
