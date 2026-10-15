@@ -1,4 +1,4 @@
-"""持倉量 × 價格的擴大參數表：python orderflow_oi_check.py --tf 4h（或 2h）
+"""持倉量 × 價格的擴大參數表：python -m research.orderflow_oi_check --tf 4h（或 2h）
 
 orderflow_backtest.py 只測回看 1/3/6 根。這裡把回看拉到 3/6/12/18 根、門檻 1.5~3σ，
 並加上「只看價格、不看持倉量」的對照組（price_only），確認持倉量有沒有多貢獻。
@@ -16,7 +16,7 @@ from pathlib import Path
 
 import pandas as pd
 
-import orderflow_backtest as ob
+from research import orderflow_backtest as ob
 from grid_trading import signals
 from grid_trading.orderflow import add_features, flow_bars
 from grid_trading.signals.evaluate import trades_for

@@ -13,17 +13,22 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
+import os
 import shutil
 import sys
+import tempfile
 import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from grid_trading import signals
-from grid_trading.markets import COMMODITY, CRYPTO, STOCK
+import signal_telegram as telegram
+from grid_trading.markets import COMMODITY, CRYPTO, STOCK, classify
+from grid_trading.pionex import PionexPublic
 from grid_trading.signals import ledger as ledger_mod
-from grid_trading.signals.engine import Engine
+from grid_trading.signals.engine import INTERVAL_MS, Engine
 from signal_backtest import liquid_symbols
 from signal_server import _sanitize
 
@@ -33,6 +38,58 @@ CHART_INTERVALS = ["15M", "60M", "4H", "1D"]
 def write_json(path: Path, obj) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(_sanitize(obj), ensure_ascii=False, separators=(",", ":"), allow_nan=False))
+
+
+def order_specs(symbols: set[str], previous: dict) -> dict:
+    """網頁「下單計算」用的派網最小下單量；抓不到就沿用上一次的。"""
+    try:
+        specs = PionexPublic().perp_specs()
+    except Exception as e:
+        print(f"注意：派網下單限制抓不到（{e}），沿用上一次的", file=sys.stderr)
+        specs = previous
+    return {s: specs[s] for s in sorted(symbols) if s in specs}
+
+
+def closing_intervals(intervals: list[str], now_ms: int, within_ms: int = 10 * 60_000) -> list[str]:
+    """最近 within_ms 內剛收盤的週期（例如 UTC 08:00 是 4H 和 2H，10:00 只有 2H）。"""
+    return [iv for iv in intervals if now_ms % INTERVAL_MS[iv] < within_ms]
+
+
+def early_push(args, symbols: list[str], data: Path, previous: dict, blocked: dict, sent_path: Path) -> dict:
+    """2H/4H 剛收盤時先只掃加密貨幣的實盤策略（沒有 tag 的），新通知馬上送 Telegram，不等整個網站產生和部署完。
+
+    抓到的 K 線回傳給完整掃描沿用，不多打派網。通知 id 和完整掃描算出來的一樣，所以送過的寫到 sent_path，
+    之後的 outbox 跳過。萬一這一輪網站沒部署成功，下一輪會再送一次（寧可重複，不要漏）。"""
+    sent_path.write_text("[]")
+    closing = closing_intervals(args.intervals, int(time.time() * 1000))
+    live = [n for n in args.strategies if not signals.get(n).tag]
+    crypto = [s for s in symbols if classify(s) == CRYPTO]
+    if not closing or not live or not crypto:
+        return {}
+    t0 = time.time()
+    tmp = Path(tempfile.mkdtemp())
+    if (data / "notifications.json").exists():
+        shutil.copy(data / "notifications.json", tmp / "notifications.json")
+    quick = Engine([signals.get(n) for n in live], crypto, closing, args.keep_days, state_dir=tmp)
+    if not quick.notifications:
+        return {}  # 沒有上一次的通知紀錄：交給完整掃描（它會當成第一次啟動、不推播）
+    seen = {n["id"] for n in quick.notifications}
+    # 沒收盤的週期也一起帶進去：「同幣同方向只做一張」要看另一個週期還開著的單
+    quick.previous = {k: s for k, s in previous.items()
+                      if s.get("symbol") in set(crypto) and s.get("strategy") in live}
+    quick.blocked = dict(blocked)
+    quick.scan_once()
+    state = quick.state()
+    msgs = telegram.messages(quick.notifications, seen, state["signals"], state["strategies"])
+    token, chat_id = os.environ.get("TELEGRAM_BOT_TOKEN"), os.environ.get("TELEGRAM_CHAT_ID")
+    if msgs and token and chat_id:
+        sent, failed = telegram.send([m for _, m in msgs], token, chat_id)
+        if not failed:  # 有失敗就全部交給之後的 outbox 重送
+            sent_path.write_text(json.dumps([i for i, _ in msgs]))
+        print(f"收盤搶先推播（{'/'.join(closing)}）：{sent} 則，失敗 {failed} 則，"
+              f"收盤後 {int(time.time() * 1000) % INTERVAL_MS[closing[-1]] / 1000:.0f} 秒", file=sys.stderr)
+    print(f"收盤搶先掃描 {len(crypto)} 個幣 {closing}，{time.time() - t0:.0f} 秒", file=sys.stderr)
+    return quick.frames
 
 
 def main() -> int:
@@ -50,6 +107,9 @@ def main() -> int:
     p.add_argument("--markets", nargs="+", default=[CRYPTO, STOCK, COMMODITY], choices=[CRYPTO, STOCK, COMMODITY])
     p.add_argument("--keep-days", type=float, default=7)
     p.add_argument("--previous-state", help="上一次的 state.json；這次 K 線沒抓到的（幣, 週期）沿用裡面的訊號")
+    p.add_argument("--early-push", metavar="SENT_JSON",
+                   help="2H/4H 剛收盤時，先只掃加密貨幣的實盤策略、馬上把新通知送到 Telegram（要有 TELEGRAM_BOT_TOKEN / "
+                        "TELEGRAM_CHAT_ID），送過的通知 id 寫到這個檔，之後的 outbox 會跳過")
     p.add_argument("--max-failed", type=float, default=0.5,
                    help="K 線抓不到的（幣, 週期）超過這個比例（大概是派網整個連不上）就不輸出，網站保留上一版")
     args = p.parse_args()
@@ -60,11 +120,18 @@ def main() -> int:
         shutil.rmtree(out)
     shutil.copytree(args.web, out)
     # 每次部署給 app.js、style.css 加上版本號，瀏覽器才不會拿舊的頁面配新的程式（或反過來）
-    version = str(int(time.time()))
+    # 版本號用網頁原始檔的內容算，網頁沒改就不變（一直開著的分頁只在真的改版時才重新載入）
+    digest = hashlib.sha256()
+    for f in sorted(Path(args.web).rglob("*")):
+        if f.is_file():
+            digest.update(str(f.relative_to(args.web)).encode() + f.read_bytes())
+    version = digest.hexdigest()[:12]
     index = out / "index.html"
     index.write_text(index.read_text().replace('src="app.js"', f'src="app.js?v={version}"')
                      .replace('href="style.css"', f'href="style.css?v={version}"'))
     data.mkdir(parents=True)
+    # 一直開著的分頁會用 data/version.json 發現網站改版，自己重新載入，不會繼續跑舊程式
+    (data / "version.json").write_text(json.dumps({"version": version}))
     (out / ".nojekyll").write_text("")
     if args.previous and Path(args.previous).exists():
         shutil.copy(args.previous, data / "notifications.json")
@@ -76,6 +143,9 @@ def main() -> int:
     except Exception:
         prev_state = {}
     engine.previous = {s["id"]: s for s in prev_state.get("signals", []) if "id" in s}
+    engine.blocked = dict(prev_state.get("blocked") or {})
+    if args.early_push:
+        engine.prefetched = early_push(args, symbols, data, engine.previous, engine.blocked, Path(args.early_push))
     engine.scan_once()
     if engine.failed:
         sample = sorted(set(engine.errors.values()))[:3]
@@ -92,6 +162,7 @@ def main() -> int:
                              engine.fee)
     write_json(data / "ledger.json", book)
     state["ledger"] = ledger_mod.summary(book)
+    state["specs"] = order_specs({s["symbol"] for s in state["signals"]}, prev_state.get("specs") or {})
     write_json(data / "state.json", state)
 
     pairs = {(s["symbol"], s["interval"], s["strategy"]) for s in state["signals"]}

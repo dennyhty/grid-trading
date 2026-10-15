@@ -5,7 +5,7 @@ name: 訊號網頁
 
 on:
   schedule:
-    - cron: "2,17,32,47 * * * *"   # 每 15 分鐘，K 線整點收盤後 2 分鐘（實際由「訊號定時器」觸發，GitHub 排程常延遲或不觸發）
+    - cron: "2,17,32,47 * * * *"   # 備用；實際由「訊號定時器」在收盤前 75 秒觸發（GitHub 排程常延遲或不觸發）
   workflow_dispatch:
     inputs:
       test_telegram:
@@ -49,10 +49,22 @@ jobs:
           fetch notifications.json previous_notifications.json '[]'
           fetch state.json previous_state.json '{}'
           fetch ledger.json previous_ledger.json '[]'
+      # 訊號定時器在收盤前 75 秒觸發：機器和套件先準備好，等到收盤後 15 秒再掃描，K 線才確定收完
+      - name: 等 K 線收盤
+        if: github.event_name != 'push'
+        run: |
+          r=$(( $(date +%s) % 900 ))   # 距離上一個 :00/:15/:30/:45 幾秒
+          if [ "$r" -ge 720 ]; then wait=$(( 900 - r + 15 )); elif [ "$r" -lt 15 ]; then wait=$(( 15 - r )); else wait=0; fi
+          echo "等 $wait 秒到收盤後 15 秒"; sleep "$wait"
+      # 2H / 4H 剛收盤時，先只掃加密貨幣的實盤策略、馬上推 Telegram（約收盤後 1 分鐘），
+      # 再做完整掃描、圖表、部署；完整的 outbox 會跳過已經送過的
       - name: 掃描訊號、產生網站
-        run: python signal_snapshot.py --out site --previous previous_notifications.json --ledger previous_ledger.json --previous-state previous_state.json
+        run: python signal_snapshot.py --out site --previous previous_notifications.json --ledger previous_ledger.json --previous-state previous_state.json --early-push early_sent.json
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
       - name: 整理要推到 Telegram 的新通知
-        run: python signal_telegram.py outbox site/data previous_notifications.json outbox.json
+        run: python signal_telegram.py outbox site/data previous_notifications.json outbox.json early_sent.json
       - uses: actions/upload-pages-artifact@v3
         with:
           path: site
@@ -95,3 +107,30 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           TELEGRAM_TEST: ${{ inputs.test_telegram }}
  
+
+  # 訊號定時器的機器偶爾會中途斷掉（例如 2026-10-15 00:38 UTC），接力就斷了，只剩這裡很稀疏的備用排程。
+  # 備用排程每次觸發時檢查一下：沒有定時器在跑就重開一個。
+  watchdog:
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+      BRANCH: ${{ github.event.repository.default_branch }}
+    steps:
+      - name: 定時器斷了就重開
+        run: |
+          running=0
+          for s in in_progress queued; do
+            n=$(gh run list --repo "$REPO" --workflow ticker.yml --status "$s" --json databaseId --jq length)
+            running=$(( running + n ))
+          done
+          if [ "$running" -eq 0 ]; then
+            echo "沒有定時器在跑，重開一個"
+            gh workflow run ticker.yml --repo "$REPO" --ref "$BRANCH"
+          else
+            echo "定時器正常（$running 個在跑）"
+          fi

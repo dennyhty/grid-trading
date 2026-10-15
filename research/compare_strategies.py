@@ -1,4 +1,4 @@
-"""1H 策略比較：python compare_strategies.py --group crypto（或 rwa）
+"""1H 策略比較：python -m research.compare_strategies --group crypto（或 rwa）
 
 在同一批幣上用訊號網頁的出場規則（tracker：TP1/2/3 各平 1/3、TP1 後保本）回測多個策略版本，
 比較期望值、前後半段、多空、油價資料開始後（2026-03-20 起）的表現。只讀已下載的 K 線快取。

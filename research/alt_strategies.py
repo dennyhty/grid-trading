@@ -1,4 +1,4 @@
-"""其他主流策略的回測：python alt_strategies.py --family meanrev|vwap|vegas|momentum [--tf 4h] [--out output]
+"""其他主流策略的回測：python -m research.alt_strategies --family meanrev|vwap|vegas|momentum [--tf 4h] [--out output]
 
 - meanrev：布林通道 + RSI 極端值的均值回歸，可加「盤整」過濾（ADX、維加斯通道走平），目標價是布林中線。
 - vwap：週/月錨定 VWAP（含成交量加權標準差帶）的偏離回歸與順勢回踩；成交量分布（POC、價值區 VAL/VAH）的

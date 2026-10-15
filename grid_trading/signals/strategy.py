@@ -49,9 +49,17 @@ class Strategy:
     min_bars = 200
     # 觀察組之類的標籤，會加在網站卡片和推播文字前面；空字串就不加
     tag = ""
+    # 只在某些類別當觀察組時用，例如 {"stock": "美股觀察組"}；沒列到的類別用 tag
+    market_tags: dict[str, str] = {}
     # 只在這些週期 / 類別上跑（engine 的週期寫法，例如 "4H"；類別 crypto/stock/commodity），None 表示全部
     intervals: tuple[str, ...] | None = None
     markets: tuple[str, ...] | None = None
+    # 實盤（沒有標籤）時，同一個幣、同方向只做一張：另一個週期的單還沒出場，新訊號就不做（engine 處理）
+    one_per_coin = False
+
+    def tag_for(self, market: str) -> str:
+        """這個類別的標籤；有標籤就是觀察組（網站顯示、不推播）。"""
+        return self.market_tags.get(market, self.tag)
 
     def prepare(self, df: pd.DataFrame) -> pd.DataFrame:
         """一次算好整段指標（只能用 ewm/rolling 這類不看未來的算法），回傳加了欄位的 df。"""

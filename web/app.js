@@ -29,8 +29,10 @@ let market = (() => { try { return localStorage.getItem("market") || "crypto"; }
 let ivFilter = (() => { try { return localStorage.getItem("iv") || "ALL"; } catch { return "ALL"; } })();
 // 策略 / 觀察組：策略有 tag（例如「SMC觀察組」「訂單流觀察組」）就算觀察組，沒有 tag 的是正式策略
 let group = (() => { try { return localStorage.getItem("group") || "strategy"; } catch { return "strategy"; } })();
-const isObserve = (name) => !!(state.strategies[name] || {}).tag;
-const inGroup = (name) => isObserve(name) === (group === "observe");
+/** 策略在某個類別的標籤；有標籤就是觀察組。美股、商品的維加斯用 market_tags 另外標成觀察組。 */
+const tagOf = (name, m) => { const st = state.strategies[name] || {}; return (st.market_tags || {})[m] ?? st.tag ?? ""; };
+const isObserve = (name, m = market) => !!tagOf(name, m);
+const inGroup = (name, m = market) => isObserve(name, m) === (group === "observe");
 const ivOf = (label) => (label === "1H" ? "60M" : label);
 /** 週期篩選列。瀏覽器快取了舊版 index.html 時沒有這個元素，就自己補在市場分頁下面，免得整頁的程式停住。 */
 /** 策略 / 觀察組 切換列（放在市場分頁下面；舊版 index.html 沒有，所以由程式建立）。 */
@@ -143,6 +145,8 @@ async function api(path) {
 }
 // 兩種模式：本機 signal_server.py（有 /api），或 GitHub Pages 靜態網站（讀 data/*.json，由排程更新）
 let STATIC = null;
+// 這一版程式的版本號（部署時加在 app.js?v= 上）；網站改版後，一直開著的分頁會自己重新載入
+const APP_VERSION = new URL(document.currentScript.src).searchParams.get("v");
 let livePrices = {};   // 靜態模式下，瀏覽器直接向 Binance 合約抓的即時價
 let livePricesAt = 0;
 
@@ -179,6 +183,12 @@ async function refresh() {
   } catch (e) {
     $("foot").textContent = `無法讀取資料：${e.message}`;
     return;
+  }
+  if (STATIC && APP_VERSION) {
+    try {
+      const { version } = await api(`data/version.json?t=${Date.now()}`);
+      if (version && version !== APP_VERSION) { location.reload(); return; }
+    } catch { /* 舊網站還沒有 version.json */ }
   }
   if (STATIC) { await loadLivePrices(); applyLivePrices(); }
   handleNotifications();
@@ -264,8 +274,8 @@ function renderStats() {
         ${a.expectancy_r <= 0 ? `<p class="warn">期望值是負的：照這個策略在${MARKET_LABEL[market]}上交易，長期是虧錢的。</p>`
           : a.expectancy_r < 0.1 ? `<p class="warn">期望值接近 0，優勢很小、可能只是運氣。先用小資金或只觀察。</p>` : ""}
         <p class="warn">上面的總報酬和回撤，是每個訊號都照單跟、每筆止損最多賠「當下」總資金 ${a.risk_per_trade_pct}% 算出來的，賺了下一筆就下得大一點，所以是複利，不等於 筆數 × 期望值 × ${a.risk_per_trade_pct}%（每筆固定賠起始資金 ${a.risk_per_trade_pct}%、不複利的話是 ${pct(a.trades * a.expectancy_r * a.risk_per_trade_pct)}）${a.max_concurrent ? `；回測期間最多同時有 ${a.max_concurrent} 筆單在持倉，很多標的會一起出訊號、一起虧，所以回撤已經包含這些一起虧的單` : ""}。每筆賠得越多，回撤就成倍放大，建議每筆止損不超過總資金的 ${a.risk_per_trade_pct}%。</p>
-        ${st.tag ? `<p class="warn">${esc(st.tag)}：只記錄實盤結果、不推播，不建議照單下。把同一天、同方向的單算成一次賭注時，2024 年後的優勢接近 0，還不能當成已驗證的策略。</p>` : ""}
-        ${liveHtml(name, iv, st.tag ? a.expectancy_r : 0.07)}`);
+        ${tagOf(name, market) ? `<p class="warn">${esc(tagOf(name, market))}：只記錄實盤結果、不推播，不建議照單下。把同一天、同方向的單算成一次賭注時，2024 年後的優勢接近 0，還不能當成已驗證的策略。</p>` : ""}
+        ${liveHtml(name, iv, tagOf(name, market) ? a.expectancy_r : 0.07)}`);
     }
   }
   $("stats").innerHTML = parts.join("") ||
@@ -304,7 +314,7 @@ function statusText(s) {
 }
 
 function tagChip(s) {
-  const tag = (state.strategies[s.strategy] || {}).tag;
+  const tag = tagOf(s.strategy, mk(s));
   return tag ? `<span class="chip tag-chip">${esc(tag)}</span>` : "";
 }
 
@@ -336,9 +346,9 @@ function hiddenNote(inMarket) {
 
 function renderList() {
   if (ivFilter !== "ALL" && !state.intervals.map(ivOf).includes(ivFilter)) ivFilter = "ALL";
-  const hasObserve = Object.keys(state.strategies).some(isObserve);
+  const hasObserve = Object.keys(state.strategies).some((n) => ["crypto", "stock", "commodity"].some((m) => isObserve(n, m)));
   if (!hasObserve) group = "strategy";
-  const openIn = (g, m) => state.signals.filter((s) => isObserve(s.strategy) === (g === "observe") && mk(s) === m
+  const openIn = (g, m) => state.signals.filter((s) => isObserve(s.strategy, m) === (g === "observe") && mk(s) === m
     && s.track.status === "OPEN").length;
   groupTabsEl().classList.toggle("hidden", !hasObserve);
   groupTabsEl().innerHTML = [["strategy", "策略"], ["observe", "觀察組"]].map(([g, name]) =>
@@ -368,7 +378,7 @@ function renderList() {
   const counts = state.markets ? Object.entries(state.markets).map(([m, v]) => `${v.label} ${v.symbols}`).join("、") : `${state.symbols} 個`;
   $("foot").textContent = `監看 ${counts} · 週期 ${state.intervals.join("/")} · ` +
     `最後掃描 ${state.updated ? fmtTime(state.updated) : "—"}` +
-    (STATIC ? ` · 訊號每 15 分鐘由 GitHub 排程更新（整點收盤後 2 分鐘就掃到新訊號） · ${market === "crypto" && livePricesAt ? "現價來自 Binance 合約即時價" : "現價為掃描時的派網價格"}`
+    (STATIC ? ` · 訊號每 15 分鐘由 GitHub 排程更新（K 線收盤後約 1 分鐘推播新訊號） · ${market === "crypto" && livePricesAt ? "現價來自 Binance 合約即時價" : "現價為掃描時的派網價格"}`
       : " · 每 30 秒更新頁面");
 }
 
@@ -413,6 +423,72 @@ function renderLevels() {
     ${ladderHtml(s, s.live)}${timelineHtml(s)}`;
 }
 
+// ---------- 下單計算：資金 × 每筆風險 % → 每一份要下多少（照派網最小下單量進位） ----------
+function sizing() {
+  const num = (k, d) => { try { const v = Number(localStorage.getItem(k)); return v > 0 ? v : d; } catch { return d; } };
+  return { capital: num("capital", 100), riskPct: num("riskPct", 0.25) };
+}
+
+/** 每一份的數量。數量照派網的級距取整，低於最小數量 / 最小名目金額時用最小值（風險會變大）。 */
+function sizePlan(s, capital, riskPct, spec) {
+  const riskU = capital * riskPct / 100;
+  const dist = Math.abs(s.price - s.sl);
+  const total = riskU / dist;
+  const e = s.exit || {};
+  const parts = (e.portions || [1 / 3, 1 / 3, 1 / 3]).slice(0, s.tps.length);
+  const rest = 1 - parts.reduce((a, b) => a + b, 0);
+  const slices = parts.map((p, k) => ({ name: `TP${k + 1}`, price: s.tps[k], p }));
+  if (rest > 1e-6) slices.push({ name: "追蹤", price: null, p: rest });
+  const step = spec && spec.step > 0 ? spec.step : 0;
+  const minQ = spec ? Math.max(spec.min_size || 0, (spec.min_notional || 0) / s.price) : 0;
+  const roundStep = (q) => step ? Math.round(q / step) * step : q;
+  const ceilStep = (q) => step ? Math.ceil(q / step - 1e-9) * step : q;
+  const minQty = ceilStep(minQ);
+  for (const x of slices) {
+    const raw = total * x.p;
+    x.qty = roundStep(raw);
+    x.bumped = x.qty < minQty;
+    if (x.bumped) x.qty = minQty;
+  }
+  const qty = slices.reduce((a, x) => a + x.qty, 0);
+  const digits = step ? Math.max(0, -Math.floor(Math.log10(step) + 1e-9)) : 6;
+  return { riskU, total, slices, qty, digits, notional: qty * s.price, actualRisk: qty * dist, spec };
+}
+
+function renderSize() {
+  const s = current;
+  if (!s) return;
+  const { capital, riskPct } = sizing();
+  const spec = (state.specs || {})[s.symbol];
+  const plan = sizePlan(s, capital, riskPct, spec);
+  const coin = mk(s) === "crypto" ? pair(s.symbol).split("/")[0] : s.symbol.replace("_USDT_PERP", "");
+  const q = (x) => x.toFixed(plan.digits);
+  const over = plan.actualRisk > plan.riskU * 1.2;
+  $("detail-size").innerHTML = `<h3 class="size-h">下單計算</h3>
+    <div class="size-in">
+      <label>資金 <input id="sz-cap" type="number" inputmode="decimal" min="1" step="any" value="${capital}"> U</label>
+      <label>每筆風險 <input id="sz-risk" type="number" inputmode="decimal" min="0.01" step="0.05" value="${riskPct}"> %</label>
+    </div>
+    <div class="kv num">
+      <span>止損賠</span><span>${plan.riskU.toFixed(2)} U（進場到 SL ${(Math.abs(s.price - s.sl) / s.price * 100).toFixed(2)}%）</span>
+      <span>總數量</span><span>${q(plan.qty)} ${esc(coin)}（約 ${plan.notional.toFixed(2)} U，資金的 ${(plan.notional / capital).toFixed(1)} 倍）</span>
+      ${plan.slices.map((x) => `<span>${x.name}${x.price != null ? ` @ ${fp(x.price, s.price)}` : ""}</span>
+        <span>${q(x.qty)} ${esc(coin)}${x.bumped ? ` <i class="warn">已調到最小下單量</i>` : ""}</span>`).join("")}
+      <span>實際止損賠</span><span class="${over ? "down" : ""}">${plan.actualRisk.toFixed(2)} U（資金的 ${(plan.actualRisk / capital * 100).toFixed(2)}%）</span>
+    </div>
+    <p class="muted">${spec ? `派網最小下單量 ${spec.min_size} ${esc(coin)}、最少 ${spec.min_notional} U；數量照 ${spec.step} 的級距取整。` : "這個標的沒有派網的下單限制資料，沒檢查最小下單量。"}
+      ${over ? "最小下單量讓實際風險比設定多，照專案規則還是下最小量（不要跳過這單）。" : ""}
+      價格用訊號價算；實際進場價不同時，數量照比例差一點沒關係，止損價照上面的 SL 掛。</p>`;
+  const save = (k, id) => () => {
+    const v = Number($(id).value);
+    if (!(v > 0)) return;
+    try { localStorage.setItem(k, String(v)); } catch { /* 私密模式 */ }
+    renderSize();
+  };
+  $("sz-cap").addEventListener("change", save("capital", "sz-cap"));
+  $("sz-risk").addEventListener("change", save("riskPct", "sz-risk"));
+}
+
 function openDetail(id) {
   const s = state && state.signals.find((x) => x.id === id);
   if (!s) return;
@@ -427,6 +503,7 @@ function openDetail(id) {
   sel.innerHTML = ivs.map((iv, k) => `<option value="${iv}">${lbl(iv)}${k === 0 ? " · 原訊號" : ""}</option>`).join("");
   renderDetailHead();
   renderLevels();
+  renderSize();
   loadChart(s.interval, true);
   window.scrollTo(0, 0);
 }
@@ -645,21 +722,28 @@ function setLive(on) {
 function lastSeen() { try { return Number(localStorage.getItem("lastSeenNote") || 0); } catch { return 0; } }
 function setLastSeen(v) { try { localStorage.setItem("lastSeenNote", String(v)); } catch { /* 私密模式 */ } }
 
-const isObserveNote = (n) => isObserve(String(n.signal_id).split("|")[2]);
+const isObserveNote = (n) => {
+  if (n.observe) return true;
+  // 舊通知沒有 observe 欄位（或寫 false，但策略後來改成觀察組）：用現在的策略設定判斷。
+  // 訊號已經不在網站上時，用通知文字判斷市場：加密貨幣寫「XXX/USDT」，美股、商品寫名稱
+  const s = state.signals.find((x) => x.id === n.signal_id);
+  const m = s ? mk(s) : String(n.text).includes("/USDT") ? "crypto" : "stock";
+  return isObserve(String(n.signal_id).split("|")[2], m);
+};
+// 鈴鐺只放實盤策略的通知；觀察組（SMC、訂單流、美股/商品的維加斯…）在各自的訊號卡上看
+const liveNotes = () => state.notifications.filter((n) => !isObserveNote(n));
 
 function handleNotifications() {
-  const notes = state.notifications;
+  const notes = liveNotes();
   const seen = lastSeen();
-  // 觀察組（SMC、訂單流…）不推播，也不算進鈴鐺的未讀數
-  const unread = notes.filter((n) => !n.initial && !isObserveNote(n) && n.created > seen).length;
+  const unread = notes.filter((n) => !n.initial && n.created > seen).length;
   $("badge").textContent = unread;
   $("badge").classList.toggle("hidden", unread === 0);
   if (notified === null) { notified = new Set(notes.map((n) => n.id)); return; }
   for (const n of notes) {
     if (notified.has(n.id)) continue;
     notified.add(n.id);
-    // 觀察組（SMC、訂單流…）只記錄在通知中心，不跳出通知
-    if (!n.initial && !isObserveNote(n) && "Notification" in window && Notification.permission === "granted") {
+    if (!n.initial && "Notification" in window && Notification.permission === "granted") {
       try { new Notification(KIND_TEXT[n.kind] || "訊號", { body: n.text, tag: n.id }); } catch { /* iOS 非安裝模式不支援 */ }
     }
   }
@@ -668,11 +752,11 @@ function handleNotifications() {
 
 function renderNotes() {
   const seen = lastSeen();
-  $("notif-list").innerHTML = state.notifications.map((n) => `
+  $("notif-list").innerHTML = liveNotes().map((n) => `
     <div class="note ${!n.initial && n.created > seen ? "new" : ""}" data-id="${esc(n.signal_id)}">
       <div>${esc(n.text)}</div><div class="t num">${eventTime(n.signal_id, n.kind, n.time)} · ${KIND_TEXT[n.kind] || n.kind}</div></div>`).join("") ||
     `<div class="empty">還沒有通知</div>`;
-  $("notif-list").insertAdjacentHTML("afterbegin", `<div class="muted" style="padding:4px 0 8px">時間是台北時間（UTC+8），網站偵測到事件的時間；每 15 分鐘掃一次（整點後 2 分鐘起），止盈止損和實際觸價最多差 15 分鐘左右；新訊號在 K 線收盤後約 2 分鐘就會出現。</div>`);
+  $("notif-list").insertAdjacentHTML("afterbegin", `<div class="muted" style="padding:4px 0 8px">時間是台北時間（UTC+8），網站偵測到事件的時間；每 15 分鐘掃一次（:00、:15、:30、:45 後 15 秒），止盈止損和實際觸價最多差 15 分鐘左右；新訊號在 K 線收盤後約 1 分鐘推播，網站晚幾分鐘出現。</div>`);
   const perm = "Notification" in window ? Notification.permission : "unsupported";
   $("notif-perm").classList.toggle("hidden", perm === "granted" || perm === "unsupported");
 }

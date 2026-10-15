@@ -181,7 +181,7 @@ def test_trailing_never_below_breakeven():
 
 def test_vegas_exit_plans_by_interval():
     v = get("vegas_trend")
-    assert v.exit_plan("4H")["trail_atr"] == 3.0
+    assert v.exit_plan("4H") == v.exit_plan("2H")  # 2026-10-15 起 4H 和 2H 出場一樣
     assert v.exit_plan("2H")["tp_r"] == [1.0, 3.0, 5.0]
     assert v.exit_plan("2H")["trail_atr"] == 3.0 and sum(v.exit_plan("2H")["portions"]) == 0.75
     assert v.exit_plan("60M") is None
@@ -203,3 +203,11 @@ def test_vegas_2h_skips_signals_with_high_adx():
     assert high and len(high) < len(every)
     assert [s.time for s in v.scan(df, "X", "2H")] == [s.time for s in every if s.time not in high]
     assert all(abs(s.info["adx"] - adx[s.time]) < 0.05 for s in every)
+
+
+def test_vegas_trend_is_observation_group_on_stocks_and_commodities():
+    from grid_trading import signals
+    v = signals.get("vegas_trend")
+    assert v.tag_for("crypto") == ""
+    assert v.tag_for("stock") and v.tag_for("commodity")
+    assert signals.get("smc_sweep").tag_for("crypto") == "SMC觀察組"

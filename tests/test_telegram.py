@@ -93,3 +93,27 @@ def test_send_does_not_retry_bad_requests(monkeypatch):
     monkeypatch.setattr("time.sleep", lambda s: None)
     assert send(["m1"], "TOKEN", "1") == (0, 1)
     assert len(calls) == 1
+
+
+def test_outbox_skips_notifications_marked_observe(tmp_path):
+    data = tmp_path / "data"
+    data.mkdir()
+    _write(tmp_path / "prev.json", [{"id": "old"}])
+    stock = "NVDAX_USDT_PERP|4H|vegas_trend|1"
+    live = "BTC_USDT_PERP|4H|vegas_trend|3"
+    _write(data / "notifications.json", [
+        {"id": f"{stock}|NEW|9", "signal_id": stock, "kind": "NEW", "text": stock, "initial": False, "observe": True},
+        {"id": f"{live}|NEW|9", "signal_id": live, "kind": "NEW", "text": live, "initial": False, "observe": False}])
+    _write(data / "state.json", {"signals": [], "strategies": {"vegas_trend": {"tag": ""}}})
+    assert build_outbox(data, tmp_path / "prev.json") == [live]
+
+
+def test_outbox_skips_notifications_already_pushed_early(tmp_path):
+    data = tmp_path / "data"
+    data.mkdir()
+    _write(tmp_path / "prev.json", [{"id": "old"}])
+    a, b = "BTC_USDT_PERP|4H|vegas_trend|1", "ETH_USDT_PERP|2H|vegas_trend|2"
+    _write(data / "notifications.json", [
+        {"id": f"{sid}|NEW|9", "signal_id": sid, "kind": "NEW", "text": sid, "initial": False} for sid in (a, b)])
+    _write(data / "state.json", {"signals": [], "strategies": {"vegas_trend": {"tag": ""}}})
+    assert build_outbox(data, tmp_path / "prev.json", {f"{a}|NEW|9"}) == [b]

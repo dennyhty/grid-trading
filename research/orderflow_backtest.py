@@ -1,4 +1,4 @@
-"""訂單流策略回測：python orderflow_backtest.py [--tf 4h] [--out output/orderflow]
+"""訂單流策略回測：python -m research.orderflow_backtest [--tf 4h] [--out output/orderflow]
 
 資料：幣安 USDT 永續 1H 月檔（含主動買入量）＋每日 metrics（持倉量、多空比），先用
 grid_trading.binance_history.fetch_binance(coin, "1h", flow=True) 和 grid_trading.binance_metrics.fetch_metrics 下載。

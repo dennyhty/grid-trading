@@ -138,3 +138,10 @@ details .kv { display: grid; grid-template-columns: auto 1fr; gap: 2px 12px; fon
 .groups table { width: 100%; border-collapse: collapse; font-size: 13px; margin: 6px 0; }
 .groups th { text-align: left; color: var(--muted); font-weight: 400; padding: 4px 2px; }
 .groups td { padding: 5px 2px; border-top: 1px solid var(--line); vertical-align: top; }
+.size-h { margin: 0 0 8px; font-size: 15px; }
+.size-in { display: flex; flex-wrap: wrap; gap: 8px 16px; margin-bottom: 10px; color: var(--muted); font-size: 14px; }
+.size-in input { width: 84px; font: inherit; color: var(--text); background: #1f2430; border: 1px solid var(--line);
+  border-radius: 8px; padding: 5px 8px; }
+#detail-size .kv { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; font-size: 13px; }
+#detail-size .warn { color: var(--gold); font-style: normal; font-size: 12px; }
+#detail-size p { margin: 10px 0 0; }

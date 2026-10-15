@@ -1,7 +1,7 @@
 """基礎指標策略研究（只做分析，不改實盤規則）。
 
-python basic_indicators_research.py --interval 4H [--source pionex]
-python basic_indicators_research.py --interval 4H --robust     第二步：候選家族換參數（穩健性）
+python -m research.basic_indicators_research --interval 4H [--source pionex]
+python -m research.basic_indicators_research --interval 4H --robust     第二步：候選家族換參數（穩健性）
 
 需要 numba（和 stop_research.py 共用模擬程式）。
 
@@ -33,7 +33,7 @@ import pandas as pd
 
 from grid_trading import indicators as ind
 from grid_trading.universe import TOP100
-from stop_research import (LIVE_ATR, MAX_BARS, MIN_STOP_PCT, PLANS, SPLIT, busy_filter, cluster_stats,
+from research.stop_research import (LIVE_ATR, MAX_BARS, MIN_STOP_PCT, PLANS, SPLIT, busy_filter, cluster_stats,
                            load_frame, sim_many, summarize)
 
 FEE = 0.0005

@@ -1,4 +1,4 @@
-"""SMC / ICT 策略回測：python smc_backtest.py [--timeframes 1H,2H,4H] [--out output]
+"""SMC / ICT 策略回測：python -m research.smc_backtest [--timeframes 1H,2H,4H] [--out output]
 
 用幣安 USDT 永續 1H 月檔（2020-01 起）合成 1H / 2H / 4H，84 個派網有合約的前 100 大幣。
 結構定義見 grid_trading/smc.py。每個組合同時算兩種成本：手續費每邊 0.05%，以及再加滑價每邊 0.05%。

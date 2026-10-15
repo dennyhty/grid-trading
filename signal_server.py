@@ -16,12 +16,13 @@ from urllib.parse import parse_qs, urlparse
 
 from grid_trading import signals
 from grid_trading.markets import COMMODITY, CRYPTO, STOCK
+from grid_trading.pionex import PionexPublic
 from grid_trading.signals.engine import INTERVAL_MS, Engine
 
 WEB = Path(__file__).parent / "web"
 
 
-def make_handler(engine: Engine):
+def make_handler(engine: Engine, specs: dict | None = None):
     class Handler(SimpleHTTPRequestHandler):
         def __init__(self, *a, **kw):
             super().__init__(*a, directory=str(WEB), **kw)
@@ -43,7 +44,9 @@ def make_handler(engine: Engine):
             q = {k: v[0] for k, v in parse_qs(url.query).items()}
             try:
                 if url.path == "/api/state":
-                    return self._json(_sanitize(engine.state()))
+                    state = engine.state()
+                    state["specs"] = specs or {}
+                    return self._json(_sanitize(state))
                 if url.path == "/api/price":
                     return self._json({"symbol": q.get("symbol"), "price": engine.prices().get(q.get("symbol", ""))})
                 if url.path == "/api/chart":
@@ -99,7 +102,12 @@ def main() -> int:
     print(f"監看 {len(symbols)} 個幣、週期 {args.intervals}，第一次掃描中…", file=sys.stderr)
     engine.scan_once()
     threading.Thread(target=engine.run_forever, args=(args.every,), daemon=True).start()
-    server = ThreadingHTTPServer((args.host, args.port), make_handler(engine))
+    try:
+        specs = PionexPublic().perp_specs()  # 網頁「下單計算」用的最小下單量
+    except Exception as e:
+        print(f"注意：派網下單限制抓不到（{e}），下單計算不會檢查最小下單量", file=sys.stderr)
+        specs = {}
+    server = ThreadingHTTPServer((args.host, args.port), make_handler(engine, specs))
     print(f"開啟 http://localhost:{args.port}", file=sys.stderr)
     try:
         server.serve_forever()
