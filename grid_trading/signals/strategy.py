@@ -54,6 +54,8 @@ class Strategy:
     # 只在這些週期 / 類別上跑（engine 的週期寫法，例如 "4H"；類別 crypto/stock/commodity），None 表示全部
     intervals: tuple[str, ...] | None = None
     markets: tuple[str, ...] | None = None
+    # 實盤（沒有標籤）時，同一個幣、同方向只做一張：另一個週期的單還沒出場，新訊號就不做（engine 處理）
+    one_per_coin = False
 
     def tag_for(self, market: str) -> str:
         """這個類別的標籤；有標籤就是觀察組（網站顯示、不推播）。"""

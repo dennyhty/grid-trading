@@ -114,6 +114,9 @@ class Engine:
         self.stats_path = stats_path
         self.lock = threading.Lock()
         self.signals: dict[str, dict] = {}
+        # 因為「同幣同方向只做一張」沒做的訊號 id → 訊號時間（ms）。記下來，擋住它的單出場、
+        # 或離開掃描範圍以後，它也不會又冒出來（網頁版從上一次的 state.json 接著用）
+        self.blocked: dict[str, int] = {}
         self.notifications: list[dict] = self._load_notifications()
         self.updated: int | None = None
         self._prices: dict[str, float] = {}
@@ -244,10 +247,40 @@ class Engine:
                             continue  # 會和已經發出的單重疊
                         busy_until = end
                         found[sid] = self._entry(sig, res)
+        self._one_per_coin(found, now)
         with self.lock:
             self._notify(found)
             self.signals = found
             self.updated = int(time.time() * 1000)
+
+    def _one_per_coin(self, found: dict[str, dict], now: pd.Timestamp) -> None:
+        """實盤策略 one_per_coin：同一個幣、同方向，另一個週期的單還沒出場時，新訊號不做（不顯示、不推播、不記帳）。
+
+        先出的那張留下；同一個時間點 2H 優先（和 research/exit_unify.py 一樣）。已經發出過的單照樣追蹤。
+        沒有掃描的週期（收盤搶先掃描只掃剛收盤的週期）用上一次的訊號判斷。"""
+        def eligible(s: dict) -> bool:
+            strat = self.strategies.get(s.get("strategy", ""))
+            return strat is not None and strat.one_per_coin and not strat.tag_for(s.get("market", ""))
+
+        published = set(self.previous or self.signals) | {n["signal_id"] for n in self.notifications}
+        entries = [s for s in found.values() if eligible(s)]
+        entries += [s for s in (self.previous or self.signals).values()
+                    if s["interval"] not in self.intervals and s["id"] not in found and eligible(s)]
+        taken: dict[tuple, list[tuple[int, int, str]]] = {}  # (幣, 策略, 方向) → [(開始, 結束, 週期)]
+        for s in sorted(entries, key=lambda s: (s["time"], s["interval"])):
+            key = (s["symbol"], s["strategy"], s["side"])
+            new = s["id"] not in published
+            if new and (s["id"] in self.blocked or any(
+                    t0 <= s["time"] < t1 for t0, t1, iv in taken.get(key, []) if iv != s["interval"])):
+                self.blocked[s["id"]] = s["time"]
+                found.pop(s["id"], None)
+                continue
+            tr = s.get("track") or {}
+            end = tr["events"][-1]["time"] if tr.get("status") == "CLOSED" and tr.get("events") else 2 ** 62
+            taken.setdefault(key, []).append((s["time"], end, s["interval"]))
+        # 只留還可能被重新掃到的（掃描範圍再多一天）
+        cut = (now - self.keep - pd.Timedelta(days=1)).timestamp() * 1000
+        self.blocked = {k: v for k, v in self.blocked.items() if v >= cut}
 
     @staticmethod
     def _entry(sig: Signal, res) -> dict:
@@ -337,6 +370,7 @@ class Engine:
                           "markets": list(s.markets) if s.markets else None}
                       for n, s in self.strategies.items()}
         return {"signals": sigs, "notifications": notes, "stats": stats, "strategies": strategies,
+                "blocked": dict(self.blocked),
                 "updated": self.updated, "intervals": [label(i) for i in self.intervals],
                 "symbols": len(self.symbols), "fee": self.fee,
                 "markets": {m: {"label": lbl, "symbols": sum(classify(s) == m for s in self.symbols)}

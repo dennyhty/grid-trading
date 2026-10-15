@@ -55,7 +55,7 @@ def closing_intervals(intervals: list[str], now_ms: int, within_ms: int = 10 * 6
     return [iv for iv in intervals if now_ms % INTERVAL_MS[iv] < within_ms]
 
 
-def early_push(args, symbols: list[str], data: Path, previous: dict, sent_path: Path) -> dict:
+def early_push(args, symbols: list[str], data: Path, previous: dict, blocked: dict, sent_path: Path) -> dict:
     """2H/4H 剛收盤時先只掃加密貨幣的實盤策略（沒有 tag 的），新通知馬上送 Telegram，不等整個網站產生和部署完。
 
     抓到的 K 線回傳給完整掃描沿用，不多打派網。通知 id 和完整掃描算出來的一樣，所以送過的寫到 sent_path，
@@ -74,8 +74,10 @@ def early_push(args, symbols: list[str], data: Path, previous: dict, sent_path: 
     if not quick.notifications:
         return {}  # 沒有上一次的通知紀錄：交給完整掃描（它會當成第一次啟動、不推播）
     seen = {n["id"] for n in quick.notifications}
+    # 沒收盤的週期也一起帶進去：「同幣同方向只做一張」要看另一個週期還開著的單
     quick.previous = {k: s for k, s in previous.items()
-                      if s.get("symbol") in set(crypto) and s.get("interval") in closing and s.get("strategy") in live}
+                      if s.get("symbol") in set(crypto) and s.get("strategy") in live}
+    quick.blocked = dict(blocked)
     quick.scan_once()
     state = quick.state()
     msgs = telegram.messages(quick.notifications, seen, state["signals"], state["strategies"])
@@ -141,8 +143,9 @@ def main() -> int:
     except Exception:
         prev_state = {}
     engine.previous = {s["id"]: s for s in prev_state.get("signals", []) if "id" in s}
+    engine.blocked = dict(prev_state.get("blocked") or {})
     if args.early_push:
-        engine.prefetched = early_push(args, symbols, data, engine.previous, Path(args.early_push))
+        engine.prefetched = early_push(args, symbols, data, engine.previous, engine.blocked, Path(args.early_push))
     engine.scan_once()
     if engine.failed:
         sample = sorted(set(engine.errors.values()))[:3]
