@@ -34,6 +34,9 @@ const tagOf = (name, m) => { const st = state.strategies[name] || {}; return (st
 const isObserve = (name, m = market) => !!tagOf(name, m);
 const inGroup = (name, m = market) => isObserve(name, m) === (group === "observe");
 const ivOf = (label) => (label === "1H" ? "60M" : label);
+// 目前分組（策略/觀察組）和市場裡有策略在掃的週期（例如 1H 只有加密貨幣的突破觀察組）
+const usedIvs = () => state.intervals.map(ivOf).filter((iv) => Object.entries(state.strategies).some(([name, st]) =>
+  inGroup(name) && (!st.markets || st.markets.includes(market)) && (!st.intervals || st.intervals.map(ivOf).includes(iv))));
 /** 週期篩選列。瀏覽器快取了舊版 index.html 時沒有這個元素，就自己補在市場分頁下面，免得整頁的程式停住。 */
 /** 策略 / 觀察組 切換列（放在市場分頁下面；舊版 index.html 沒有，所以由程式建立）。 */
 function groupTabsEl() {
@@ -235,11 +238,11 @@ function compactStats() {
       rows.push(`<div><b>${esc(st.title)} · ${lbl(iv)}</b><div class="muted">${bt}${live ? "；" + live : ""}</div></div>`);
     }
   }
-  return `${rows.join("")}<div class="muted">點上方 ${state.intervals.join(" / ")} 看完整回測和風險說明。</div>`;
+  return `${rows.join("")}<div class="muted">點上方 ${usedIvs().map(lbl).join(" / ")} 看完整回測和風險說明。</div>`;
 }
 
 function renderStats() {
-  if (ivFilter === "ALL" && state.intervals.length > 1) { $("stats").innerHTML = compactStats(); return; }
+  if (ivFilter === "ALL" && usedIvs().length > 1) { $("stats").innerHTML = compactStats(); return; }
   const parts = [];
   for (const [name, st] of Object.entries(state.strategies)) {
     if (!inGroup(name)) continue;
@@ -345,9 +348,10 @@ function hiddenNote(inMarket) {
 }
 
 function renderList() {
-  if (ivFilter !== "ALL" && !state.intervals.map(ivOf).includes(ivFilter)) ivFilter = "ALL";
   const hasObserve = Object.keys(state.strategies).some((n) => ["crypto", "stock", "commodity"].some((m) => isObserve(n, m)));
   if (!hasObserve) group = "strategy";
+  const ivs = usedIvs();
+  if (ivFilter !== "ALL" && !ivs.includes(ivFilter)) ivFilter = "ALL";
   const openIn = (g, m) => state.signals.filter((s) => isObserve(s.strategy, m) === (g === "observe") && mk(s) === m
     && s.track.status === "OPEN").length;
   groupTabsEl().classList.toggle("hidden", !hasObserve);
@@ -360,7 +364,6 @@ function renderList() {
     b.querySelector("span").textContent = openIn(group, m) || "";
   });
   const inMarket = state.signals.filter((s) => mk(s) === market && inGroup(s.strategy));
-  const ivs = state.intervals.map(ivOf);
   ivTabsEl().classList.toggle("hidden", ivs.length < 2);
   ivTabsEl().innerHTML = ["ALL", ...ivs].map((iv) => {
     const n = inMarket.filter((s) => (iv === "ALL" || s.interval === iv) && s.track.status === "OPEN").length;

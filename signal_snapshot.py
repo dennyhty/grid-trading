@@ -61,8 +61,10 @@ def early_push(args, symbols: list[str], data: Path, previous: dict, blocked: di
     抓到的 K 線回傳給完整掃描沿用，不多打派網。通知 id 和完整掃描算出來的一樣，所以送過的寫到 sent_path，
     之後的 outbox 跳過。萬一這一輪網站沒部署成功，下一輪會再送一次（寧可重複，不要漏）。"""
     sent_path.write_text("[]")
-    closing = closing_intervals(args.intervals, int(time.time() * 1000))
     live = [n for n in args.strategies if not signals.get(n).tag]
+    # 只看實盤策略會用到的週期：1H 只有觀察組，整點不用搶先掃
+    used = {iv for n in live for iv in (signals.get(n).intervals or args.intervals)}
+    closing = closing_intervals([iv for iv in args.intervals if iv in used], int(time.time() * 1000))
     crypto = [s for s in symbols if classify(s) == CRYPTO]
     if not closing or not live or not crypto:
         return {}
@@ -98,8 +100,9 @@ def main() -> int:
     p.add_argument("--web", default="web", help="網頁原始檔，會複製到 --out")
     p.add_argument("--previous", help="上一次的 notifications.json，用來接續通知紀錄")
     p.add_argument("--ledger", help="上一次的 ledger.json（實盤紀錄），沒有就從頭開始")
-    p.add_argument("--strategies", nargs="+", default=["vegas_trend", "smc_sweep", "smc_sweep_2h", "oi_build", "oi_build_2h"], choices=sorted(signals.REGISTRY))
-    p.add_argument("--intervals", nargs="+", default=["4H", "2H"])
+    p.add_argument("--strategies", nargs="+", default=["vegas_trend", "smc_sweep", "smc_sweep_2h", "oi_build", "oi_build_2h",
+                                                     "breakout_momentum"], choices=sorted(signals.REGISTRY))
+    p.add_argument("--intervals", nargs="+", default=["4H", "2H", "60M"])
     p.add_argument("--crypto-list", choices=["top100", "volume"], default="top100",
                    help="加密貨幣：市值前 100 名（預設），或 24h 成交額 >= --min-volume")
     p.add_argument("--min-volume", type=float, default=5e6, help="加密貨幣 24h 成交額下限 (USDT)")
