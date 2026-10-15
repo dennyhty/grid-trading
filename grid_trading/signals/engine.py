@@ -45,6 +45,14 @@ def _get_retry(api: PionexPublic, path: str, params: dict, tries: int = 4) -> tu
     return None, err
 
 
+def synthesize(raw: pd.DataFrame, interval: str) -> pd.DataFrame:
+    """由來源週期的 K 線合成 SYNTHETIC 裡的週期（例如 1H → 2H），沿用來源的「沒抓完整」標記。"""
+    df = resample(raw, f"{INTERVAL_MS[interval] // 3_600_000}h", origin="epoch") if len(raw) else raw
+    df.attrs["incomplete"] = raw.attrs.get("incomplete", False)
+    df.attrs["error"] = raw.attrs.get("error", "")
+    return df
+
+
 def fetch_klines(api: PionexPublic, symbol: str, interval: str, bars: int = 1000) -> pd.DataFrame:
     """抓最近 bars 根 K 線（每次最多 500，往回翻頁）。最後一根可能還沒收盤。
 
@@ -53,11 +61,7 @@ def fetch_klines(api: PionexPublic, symbol: str, interval: str, bars: int = 1000
     """
     if interval in SYNTHETIC:
         base, k = SYNTHETIC[interval]
-        raw = fetch_klines(api, symbol, base, bars * k)
-        df = resample(raw, f"{INTERVAL_MS[interval] // 3_600_000}h", origin="epoch") if len(raw) else raw
-        df.attrs["incomplete"] = raw.attrs.get("incomplete", False)
-        df.attrs["error"] = raw.attrs.get("error", "")
-        return df
+        return synthesize(fetch_klines(api, symbol, base, bars * k), interval)
     frames = []
     end = None
     incomplete, error = False, ""
@@ -129,14 +133,27 @@ class Engine:
         return self._local.api
 
     def klines_many(self, jobs: list[tuple[str, str]], bars: int = 1000) -> dict[tuple[str, str], pd.DataFrame]:
-        """同時抓多個（symbol, interval）的 K 線；SCAN_BARS 裡有的週期改用那個根數。prefetched 裡完整的直接用。"""
-        def get(j):
+        """同時抓多個（symbol, interval）的 K 線；SCAN_BARS 裡有的週期改用那個根數。prefetched 裡完整的直接用。
+
+        合成的週期（2H）改抓來源週期（1H）再合成；同一個幣也要掃 1H 時共用同一份 1H，不多打派網。
+        抓到的來源 K 線也放進回傳結果（例如只掃 2H 時多一個 1H），畫圖和下一次掃描可以直接用。"""
+        need: dict[tuple[str, str], int] = {}  # 實際要抓的（幣, 週期）→ 根數
+        for sym, iv in jobs:
+            base, k = SYNTHETIC.get(iv, (iv, 1))
+            need[(sym, base)] = max(need.get((sym, base), 0), SCAN_BARS.get(iv, bars) * k)
+
+        def get(item):
+            j, n = item
             df = self.prefetched.get(j)
-            if df is not None and not df.attrs.get("incomplete"):
+            if df is not None and not df.attrs.get("incomplete") and len(df) >= min(n, 500):
                 return df
-            return fetch_klines(self.client(), j[0], j[1], SCAN_BARS.get(j[1], bars))
+            return fetch_klines(self.client(), j[0], j[1], n)
         with ThreadPoolExecutor(self.workers) as ex:
-            return dict(zip(jobs, ex.map(get, jobs)))
+            out = dict(zip(need, ex.map(get, need.items())))
+        for sym, iv in jobs:
+            if iv in SYNTHETIC:
+                out[(sym, iv)] = synthesize(out[(sym, SYNTHETIC[iv][0])], iv)
+        return out
 
     def klines(self, symbol: str, interval: str, bars: int = 1000) -> pd.DataFrame:
         """先用這次掃描抓到的 K 線（省一次請求），沒有才去抓。"""
@@ -186,7 +203,7 @@ class Engine:
         frames = self.klines_many([(sym, iv) for iv in self.intervals for sym in self.symbols])
         self.frames = frames
         # 重試後還是沒抓完整的（幣, 週期）：這些沿用上一次的訊號
-        self.failed = sorted(k for k, df in frames.items() if df.attrs.get("incomplete"))
+        self.failed = sorted(k for k, df in frames.items() if df.attrs.get("incomplete") and k[1] in self.intervals)
         self.errors = {k: frames[k].attrs.get("error", "") for k in self.failed}
         failed = set(self.failed)
         self.carried = 0

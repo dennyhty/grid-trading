@@ -42,6 +42,7 @@ class VegasTrend(Strategy):
                    "2H 在 ADX ≥ 24 時不做。加密貨幣同一個幣、同方向，另一個週期（2H/4H）的單還沒出場時不做新單。")
     chart_emas = {"EMA12": 12, "EMA144": 144, "EMA169": 169, "EMA576": 576, "EMA676": 676}
     min_bars = 200
+    intervals = ("4H", "2H")  # 網站也掃 1H（突破觀察組），維加斯不做 1H
     EXIT_PLANS = {
         "4H": {"tp_r": [1.0, 3.0, 5.0], "portions": [0.25, 0.25, 0.25], "trail_atr": 3.0},
         "2H": {"tp_r": [1.0, 3.0, 5.0], "portions": [0.25, 0.25, 0.25], "trail_atr": 3.0},
