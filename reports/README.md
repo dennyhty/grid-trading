@@ -23,6 +23,7 @@
 
 | 日期 | 報告 | 一句話結論 |
 |---|---|---|
+| 10-15 | [Larry Williams 外包日反轉](signals/report_outside_day_20261015.md) | 日線、4H、多空、各種停損都約 0R，和隨便進場一樣；高勝率來自出場方式，不採用 |
 | 10-13 | [基礎指標（深入版）](signals/report_basic_indicators_opus_max_20261013.md) | 反轉、背離都輸；勝率由出場決定；2H 維加斯仍最好 |
 | 10-13 | [基礎指標（普通版）](signals/report_basic_indicators_opus_medium_20261013.md) | 40 種指標都沒贏維加斯；RSI 背離 + EMA200 列候選 |
 | 10-12 | [訂單流](signals/report_orderflow_20261012.md) | CVD 背離最差；價漲倉增當觀察組 |
