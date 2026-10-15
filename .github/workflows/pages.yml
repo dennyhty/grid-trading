@@ -107,3 +107,30 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           TELEGRAM_TEST: ${{ inputs.test_telegram }}
  
+
+  # 訊號定時器的機器偶爾會中途斷掉（例如 2026-10-15 00:38 UTC），接力就斷了，只剩這裡很稀疏的備用排程。
+  # 備用排程每次觸發時檢查一下：沒有定時器在跑就重開一個。
+  watchdog:
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+      BRANCH: ${{ github.event.repository.default_branch }}
+    steps:
+      - name: 定時器斷了就重開
+        run: |
+          running=0
+          for s in in_progress queued; do
+            n=$(gh run list --repo "$REPO" --workflow ticker.yml --status "$s" --json databaseId --jq length)
+            running=$(( running + n ))
+          done
+          if [ "$running" -eq 0 ]; then
+            echo "沒有定時器在跑，重開一個"
+            gh workflow run ticker.yml --repo "$REPO" --ref "$BRANCH"
+          else
+            echo "定時器正常（$running 個在跑）"
+          fi

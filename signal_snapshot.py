@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import shutil
@@ -117,11 +118,18 @@ def main() -> int:
         shutil.rmtree(out)
     shutil.copytree(args.web, out)
     # 每次部署給 app.js、style.css 加上版本號，瀏覽器才不會拿舊的頁面配新的程式（或反過來）
-    version = str(int(time.time()))
+    # 版本號用網頁原始檔的內容算，網頁沒改就不變（一直開著的分頁只在真的改版時才重新載入）
+    digest = hashlib.sha256()
+    for f in sorted(Path(args.web).rglob("*")):
+        if f.is_file():
+            digest.update(str(f.relative_to(args.web)).encode() + f.read_bytes())
+    version = digest.hexdigest()[:12]
     index = out / "index.html"
     index.write_text(index.read_text().replace('src="app.js"', f'src="app.js?v={version}"')
                      .replace('href="style.css"', f'href="style.css?v={version}"'))
     data.mkdir(parents=True)
+    # 一直開著的分頁會用 data/version.json 發現網站改版，自己重新載入，不會繼續跑舊程式
+    (data / "version.json").write_text(json.dumps({"version": version}))
     (out / ".nojekyll").write_text("")
     if args.previous and Path(args.previous).exists():
         shutil.copy(args.previous, data / "notifications.json")

@@ -5,7 +5,7 @@
 
 ## 1. 收到新訊號
 
-Telegram 會收到「BTC/USDT 4H 做多訊號 @ 價格」。只有實盤策略會推播；網站上的「觀察組」不用跟。
+Telegram 和網站的鈴鐺會收到「BTC/USDT 4H 做多訊號 @ 價格」。只有加密貨幣的實盤策略會推播、會進鈴鐺；網站上的「觀察組」（含美股、商品）不用跟。
 
 1. 打開網站，點那張訊號卡。
 2. 往下捲到 **下單計算**：
@@ -49,7 +49,7 @@ Telegram 會收到「BTC/USDT 4H 做多訊號 @ 價格」。只有實盤策略�
 
 | 狀況 | 怎麼辦 |
 |---|---|
-| 網站「最後掃描」時間超過 30 分鐘沒更新 | GitHub → Actions → 訊號定時器 → Run workflow 重新啟動 |
+| 網站「最後掃描」時間超過 30 分鐘沒更新 | GitHub → Actions → 訊號定時器 → Run workflow 重新啟動（備用排程也會自動檢查、重開） |
 | 某些幣的持倉不見了 | 通常是派網限流，下一輪會補回來；持續的話在專案裡說 |
 | Telegram 沒收到 | Actions 裡 pages.yml 最後一步的紀錄；token 和 chat id 在 repo 的 Secrets |
 | 想暫停所有訊號 | Actions → 訊號定時器 → Disable workflow |
