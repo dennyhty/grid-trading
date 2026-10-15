@@ -7,6 +7,7 @@
 
 | 日期 | 報告 | 一句話結論 |
 |---|---|---|
+| 10-15 | [止損單共同特徵](signals/report_vegas_trend_stoploss_profile_20261015.md) | 近期止損單偏「大 K、爆量」，但這群歷史上最賺；沒有特徵能預測止損，規則不改，建議設總風險上限 |
 | 10-13 | [進場條件與選幣](signals/report_vegas_trend_entry_20261013.md) | 濾網、模型、挑幣都過不了樣本外；只有 2H「ADX≥24 不做」留下（已上線） |
 | 10-13 | [止損深入研究](signals/report_vegas_trend_stoploss_20261013.md) | 96 種止損都沒有比 1.5 ATR 好，維持不變 |
 | 10-13 | [止損與止盈](signals/report_vegas_trend_exits_20261013.md) | 讓獲利跑比 1/2/3R 好；4H 1R 平一半 + 追蹤、2H 1/3/5R + 追蹤（已上線） |
