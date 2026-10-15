@@ -145,6 +145,8 @@ async function api(path) {
 }
 // 兩種模式：本機 signal_server.py（有 /api），或 GitHub Pages 靜態網站（讀 data/*.json，由排程更新）
 let STATIC = null;
+// 這一版程式的版本號（部署時加在 app.js?v= 上）；網站改版後，一直開著的分頁會自己重新載入
+const APP_VERSION = new URL(document.currentScript.src).searchParams.get("v");
 let livePrices = {};   // 靜態模式下，瀏覽器直接向 Binance 合約抓的即時價
 let livePricesAt = 0;
 
@@ -181,6 +183,12 @@ async function refresh() {
   } catch (e) {
     $("foot").textContent = `無法讀取資料：${e.message}`;
     return;
+  }
+  if (STATIC && APP_VERSION) {
+    try {
+      const { version } = await api(`data/version.json?t=${Date.now()}`);
+      if (version && version !== APP_VERSION) { location.reload(); return; }
+    } catch { /* 舊網站還沒有 version.json */ }
   }
   if (STATIC) { await loadLivePrices(); applyLivePrices(); }
   handleNotifications();
@@ -715,24 +723,27 @@ function lastSeen() { try { return Number(localStorage.getItem("lastSeenNote") |
 function setLastSeen(v) { try { localStorage.setItem("lastSeenNote", String(v)); } catch { /* 私密模式 */ } }
 
 const isObserveNote = (n) => {
-  if (n.observe != null) return n.observe;
-  const s = state.signals.find((x) => x.id === n.signal_id);  // 舊通知沒有 observe 欄位
-  return isObserve(String(n.signal_id).split("|")[2], s ? mk(s) : "crypto");
+  if (n.observe) return true;
+  // 舊通知沒有 observe 欄位（或寫 false，但策略後來改成觀察組）：用現在的策略設定判斷。
+  // 訊號已經不在網站上時，用通知文字判斷市場：加密貨幣寫「XXX/USDT」，美股、商品寫名稱
+  const s = state.signals.find((x) => x.id === n.signal_id);
+  const m = s ? mk(s) : String(n.text).includes("/USDT") ? "crypto" : "stock";
+  return isObserve(String(n.signal_id).split("|")[2], m);
 };
+// 鈴鐺只放實盤策略的通知；觀察組（SMC、訂單流、美股/商品的維加斯…）在各自的訊號卡上看
+const liveNotes = () => state.notifications.filter((n) => !isObserveNote(n));
 
 function handleNotifications() {
-  const notes = state.notifications;
+  const notes = liveNotes();
   const seen = lastSeen();
-  // 觀察組（SMC、訂單流…）不推播，也不算進鈴鐺的未讀數
-  const unread = notes.filter((n) => !n.initial && !isObserveNote(n) && n.created > seen).length;
+  const unread = notes.filter((n) => !n.initial && n.created > seen).length;
   $("badge").textContent = unread;
   $("badge").classList.toggle("hidden", unread === 0);
   if (notified === null) { notified = new Set(notes.map((n) => n.id)); return; }
   for (const n of notes) {
     if (notified.has(n.id)) continue;
     notified.add(n.id);
-    // 觀察組（SMC、訂單流…）只記錄在通知中心，不跳出通知
-    if (!n.initial && !isObserveNote(n) && "Notification" in window && Notification.permission === "granted") {
+    if (!n.initial && "Notification" in window && Notification.permission === "granted") {
       try { new Notification(KIND_TEXT[n.kind] || "訊號", { body: n.text, tag: n.id }); } catch { /* iOS 非安裝模式不支援 */ }
     }
   }
@@ -741,7 +752,7 @@ function handleNotifications() {
 
 function renderNotes() {
   const seen = lastSeen();
-  $("notif-list").innerHTML = state.notifications.map((n) => `
+  $("notif-list").innerHTML = liveNotes().map((n) => `
     <div class="note ${!n.initial && n.created > seen ? "new" : ""}" data-id="${esc(n.signal_id)}">
       <div>${esc(n.text)}</div><div class="t num">${eventTime(n.signal_id, n.kind, n.time)} · ${KIND_TEXT[n.kind] || n.kind}</div></div>`).join("") ||
     `<div class="empty">還沒有通知</div>`;
