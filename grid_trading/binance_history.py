@@ -120,3 +120,60 @@ def load(coin: str, interval: str) -> pd.DataFrame:
     df = pd.read_csv(path)
     df["time"] = pd.to_datetime(df["time"], unit="ms", utc=True)
     return df.reset_index(drop=True)
+
+
+# 合約上市前用現貨補：現貨月檔從 2017-08 開始。1000 倍合約的現貨價要乘 1000 才接得上。
+SPOT_SYMBOLS = {
+    "SHIB": [("SHIBUSDT", 1000.0)],
+    "PEPE": [("PEPEUSDT", 1000.0)],
+    "POL": [("MATICUSDT", 1.0), ("POLUSDT", 1.0)],
+    "RENDER": [("RNDRUSDT", 1.0), ("RENDERUSDT", 1.0)],
+}
+SPOT_CACHE_DIR = Path("data/binance_spot")
+
+
+def fetch_spot_before(coin: str, interval: str, before_ms: int) -> pd.DataFrame:
+    """幣安現貨 K 線，只抓合約第一根 K 線那個月以前的月檔（time 毫秒）。"""
+    from grid_trading.spot_history import _keys, _read_zip as _read_spot
+
+    path = SPOT_CACHE_DIR / f"{coin}_{interval}_pre.csv.gz"
+    if path.exists():
+        return pd.read_csv(path)
+    session = requests.Session()
+    first = pd.Timestamp(before_ms, unit="ms").to_period("M")
+    parts = []
+    for sym, scale in SPOT_SYMBOLS.get(coin, [(f"{coin}USDT", 1.0)]):
+        for attempt in range(4):
+            try:
+                listed = _keys(f"data/spot/monthly/klines/{sym}/{interval}/", session)
+                break
+            except requests.RequestException:
+                if attempt == 3:
+                    raise
+        keys = [k for k in listed if pd.Period(k[-11:-4], "M") <= first]
+        for k in keys:
+            d = _read_spot(k, session)
+            d[["open", "high", "low", "close"]] *= scale
+            d["volume"] /= scale
+            parts.append(d)
+    df = pd.concat(parts) if parts else pd.DataFrame(columns=COLUMNS)
+    df = df[df["time"] < before_ms]
+    SPOT_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    df.to_csv(path, index=False)
+    return df
+
+
+def load_extended(coin: str, interval: str) -> pd.DataFrame:
+    """合約 K 線，前面接上合約上市前的現貨 K 線（time 為 UTC）。"""
+    fut = load(coin, interval)
+    if fut.empty:
+        return fut
+    start = int(fut["time"].iloc[0].value // 1_000_000)
+    pre = fetch_spot_before(coin, interval, start)
+    if pre.empty:
+        return fut
+    ms = (fut["time"] - pd.Timestamp(0, tz="UTC")) // pd.Timedelta(milliseconds=1)
+    raw = fut.assign(time=ms)[COLUMNS]
+    df = clean(pd.concat([pre[COLUMNS], raw]))
+    df["time"] = pd.to_datetime(df["time"], unit="ms", utc=True)
+    return df.reset_index(drop=True)
