@@ -23,6 +23,7 @@
 
 | 日期 | 報告 | 一句話結論 |
 |---|---|---|
+| 10-18 | [諧波型態](signals/report_harmonic_20261018.md) | 9 種諧波型態（含鯊魚、蝙蝠、螃蟹）× 1H/4H/日線全部沒有優勢，鯊魚和 AB=CD 穩定虧錢 |
 | 10-18 | [Threads 截圖策略](signals/report_threads_strategies_20261018.md) | AI 挑幣機器人、鯊魚諧波都虧；日線 EMA8/20 剛交叉 + 吞沒全期 +0.17R，但 2024 年後只剩 +0.11R（不顯著） |
 | 10-13 | [基礎指標（深入版）](signals/report_basic_indicators_opus_max_20261013.md) | 反轉、背離都輸；勝率由出場決定；2H 維加斯仍最好 |
 | 10-13 | [基礎指標（普通版）](signals/report_basic_indicators_opus_medium_20261013.md) | 40 種指標都沒贏維加斯；RSI 背離 + EMA200 列候選 |
