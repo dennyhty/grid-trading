@@ -95,6 +95,19 @@ def test_send_does_not_retry_bad_requests(monkeypatch):
     assert len(calls) == 1
 
 
+def test_send_does_not_resend_after_timeout(monkeypatch):
+    calls = []
+
+    def fake(url, body, timeout):
+        calls.append(body)
+        raise TimeoutError("timed out")  # 訊息可能已送達，只是沒等到回應
+
+    monkeypatch.setattr("urllib.request.urlopen", fake)
+    monkeypatch.setattr("time.sleep", lambda s: None)
+    assert send(["m1"], "TOKEN", "1") == (1, 0)
+    assert len(calls) == 1
+
+
 def test_outbox_skips_notifications_marked_observe(tmp_path):
     data = tmp_path / "data"
     data.mkdir()
