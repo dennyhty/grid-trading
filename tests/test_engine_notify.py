@@ -271,3 +271,43 @@ def test_one_per_coin_uses_previous_signals_of_intervals_not_scanned(tmp_path):
     found = {b_id: b}
     eng._one_per_coin(found, now)
     assert found == {}
+
+
+def test_signal_that_shows_up_late_on_an_already_scanned_bar_is_skipped(tmp_path, monkeypatch):
+    """EMA 起算點跟著 K 線視窗移動，接近交叉的地方幾天後可能翻過來，讓舊 K 線事後多出一個訊號。
+    上一次已經掃過那根 K 線、當時沒有這個訊號的話，不顯示、不推播；剛收盤的新訊號照常出現。"""
+    import pandas as pd
+
+    from grid_trading.signals.strategy import Signal, Strategy
+
+    bar = 14_400_000
+    now = int(time.time() * 1000) // bar * bar + 60_000
+    df = _candles(300, now - 300 * bar, bar)
+    t = lambda i: df["time"].iloc[i] + pd.Timedelta(milliseconds=bar)  # noqa: E731
+
+    class Drift(Strategy):
+        name = "vegas_trend"
+
+        def scan(self, df, symbol, interval, start=None):
+            mk = lambda i: Signal(symbol, interval, "SHORT", t(i), 100.0, 105.0, [95.0, 90.0, 85.0], self.name)  # noqa: E731
+            return [mk(270), mk(298)]
+
+    eng = Engine([Drift()], ["BTC_USDT_PERP"], ["4H"], state_dir=tmp_path)
+    eng.notifications = [{"id": "x", "signal_id": "x", "kind": "NEW", "time": 0, "created": 0, "text": "", "initial": False}]
+    eng.scanned = {"BTC_USDT_PERP|4H": int(t(297).timestamp() * 1000)}  # 上一次掃到第 297 根
+    monkeypatch.setattr(eng, "klines_many", lambda jobs, bars=1000: {j: df for j in jobs})
+    eng.scan_once()
+    late_id = f"BTC_USDT_PERP|4H|vegas_trend|{int(t(270).timestamp())}"
+    new_id = f"BTC_USDT_PERP|4H|vegas_trend|{int(t(298).timestamp())}"
+    assert set(eng.signals) == {new_id} and eng.late == 1
+    assert not any(n["signal_id"] == late_id for n in eng.notifications)
+    assert eng.scanned["BTC_USDT_PERP|4H"] == int(t(299).timestamp() * 1000)  # 最後一根收盤的
+
+    # 已經發出過的訊號不受影響
+    eng = Engine([Drift()], ["BTC_USDT_PERP"], ["4H"], state_dir=tmp_path)
+    eng.notifications = [{"id": f"{late_id}|NEW|0", "signal_id": late_id, "kind": "NEW", "time": 0, "created": 0,
+                          "text": "", "initial": False}]
+    eng.scanned = {"BTC_USDT_PERP|4H": int(t(298).timestamp() * 1000)}
+    monkeypatch.setattr(eng, "klines_many", lambda jobs, bars=1000: {j: df for j in jobs})
+    eng.scan_once()
+    assert late_id in eng.signals

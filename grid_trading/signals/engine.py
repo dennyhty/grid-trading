@@ -121,6 +121,11 @@ class Engine:
         # 因為「同幣同方向只做一張」沒做的訊號 id → 訊號時間（ms）。記下來，擋住它的單出場、
         # 或離開掃描範圍以後，它也不會又冒出來（網頁版從上一次的 state.json 接著用）
         self.blocked: dict[str, int] = {}
+        # 每個「幣|週期」上一次掃到哪一根收盤 K 線（收盤時間 ms）。那根以前的 K 線上一次就掃過了，
+        # 這次才冒出來、又沒發過的訊號，是指標起算點跟著 K 線視窗往前移、EMA 等數值微幅漂移造成的，
+        # 當時沒有這個訊號，不顯示、不推播、不記帳（網頁版從上一次的 state.json 接著用）
+        self.scanned: dict[str, int] = {}
+        self.late = 0
         self.notifications: list[dict] = self._load_notifications()
         self.updated: int | None = None
         self._prices: dict[str, float] = {}
@@ -207,6 +212,9 @@ class Engine:
         self.errors = {k: frames[k].attrs.get("error", "") for k in self.failed}
         failed = set(self.failed)
         self.carried = 0
+        self.late = 0
+        seen_until = dict(self.scanned)
+        published = set(self.previous or self.signals) | {n["signal_id"] for n in self.notifications}
         # 還沒結束的單（含已經超過 keep_days、離開掃描範圍的）：這次照樣追蹤到結束為止，
         # 網站上的持倉才不會在第 7 天消失，之後的 TP / 止損也照樣推播
         lingering: dict[tuple, list[dict]] = {}
@@ -228,6 +236,10 @@ class Engine:
                 start = max(0, len(closed) - int(self.keep / bar) - 1)
                 # 這次掃描最早能找到的訊號時間（訊號時間 = 訊號 K 線的收盤時間）
                 window = closed["time"].iloc[start] + bar if len(closed) else now
+                key = f"{sym}|{interval}"
+                before = seen_until.get(key, -1)
+                if len(closed):
+                    self.scanned[key] = int((closed["time"].iloc[-1] + bar).timestamp() * 1000)
                 for strat in self.strategies.values():
                     if (strat.intervals and interval not in strat.intervals) or \
                             (strat.markets and classify(sym) not in strat.markets):
@@ -255,6 +267,9 @@ class Engine:
                         held.append((t0, res.events[-1].time if res.status == "CLOSED" else now + bar))
                     busy_until = None
                     for sid, sig in scanned.items():
+                        if sid not in published and int(sig.time.timestamp() * 1000) <= before:
+                            self.late += 1  # 上一次掃過那根 K 線時沒有這個訊號：事後才冒出來的，不做
+                            continue
                         if (busy_until is not None and sig.time < busy_until) or \
                                 any(t0 <= sig.time < t1 for t0, t1 in held):
                             continue
@@ -387,7 +402,7 @@ class Engine:
                           "markets": list(s.markets) if s.markets else None}
                       for n, s in self.strategies.items()}
         return {"signals": sigs, "notifications": notes, "stats": stats, "strategies": strategies,
-                "blocked": dict(self.blocked),
+                "blocked": dict(self.blocked), "scanned": dict(self.scanned),
                 "updated": self.updated, "intervals": [label(i) for i in self.intervals],
                 "symbols": len(self.symbols), "fee": self.fee,
                 "markets": {m: {"label": lbl, "symbols": sum(classify(s) == m for s in self.symbols)}
