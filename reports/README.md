@@ -7,6 +7,8 @@
 
 | 日期 | 報告 | 一句話結論 |
 |---|---|---|
+| 10-18 | [BTC 跌破 EMA200 不做多](signals/report_bear_nolong_20261018.md) | 被擋掉的多單平均 +0.09R，10 種寫法 Sharpe 都略低；只在 2022 讓回撤變小，不建議加 |
+| 10-18 | [牛熊濾網](signals/report_regime_filter_20261018.md) | BTC 日線 EMA200、200 週均線分牛熊都讓績效變差；牛市裡的空單是最賺的一群，不加濾網 |
 | 10-15 | [出場統一、同幣只做一張](signals/report_vegas_trend_exit_unify_20261015.md) | 4H 改用 2H 的 1/3/5R 出場 Sharpe 一樣或較好；同幣同向只做一張總獲利少約兩成、回撤小約 4 個百分點 |
 | 10-15 | [止損單共同特徵](signals/report_vegas_trend_stoploss_profile_20261015.md) | 近期止損單偏「大 K、爆量」，但這群歷史上最賺；沒有特徵能預測止損，規則不改，建議設總風險上限 |
 | 10-13 | [進場條件與選幣](signals/report_vegas_trend_entry_20261013.md) | 濾網、模型、挑幣都過不了樣本外；只有 2H「ADX≥24 不做」留下（已上線） |
@@ -23,6 +25,8 @@
 
 | 日期 | 報告 | 一句話結論 |
 |---|---|---|
+| 10-18 | [諧波型態](signals/report_harmonic_20261018.md) | 9 種諧波型態（含鯊魚、蝙蝠、螃蟹）× 1H/4H/日線全部沒有優勢，鯊魚和 AB=CD 穩定虧錢 |
+| 10-18 | [Threads 截圖策略](signals/report_threads_strategies_20261018.md) | AI 挑幣機器人、鯊魚諧波都虧；日線 EMA8/20 剛交叉 + 吞沒全期 +0.17R，但 2024 年後只剩 +0.11R（不顯著） |
 | 10-13 | [基礎指標（深入版）](signals/report_basic_indicators_opus_max_20261013.md) | 反轉、背離都輸；勝率由出場決定；2H 維加斯仍最好 |
 | 10-13 | [基礎指標（普通版）](signals/report_basic_indicators_opus_medium_20261013.md) | 40 種指標都沒贏維加斯；RSI 背離 + EMA200 列候選 |
 | 10-12 | [訂單流](signals/report_orderflow_20261012.md) | CVD 背離最差；價漲倉增當觀察組 |
