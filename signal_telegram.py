@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import os
+import socket
 import sys
 import time
 import urllib.parse
@@ -83,6 +84,10 @@ def send(messages: list[str], token: str, chat_id: str) -> tuple[int, int]:
                 break
             except Exception as e:  # 錯誤訊息不含 token（只印類型和狀態碼）
                 code = getattr(e, "code", "")
+                if _timed_out(e):
+                    # 請求可能已經送達、只是回應沒等到（2026-10-18 XMR TP1 就是這樣收到兩次）：重送會重複，寧可不重送
+                    print(f"第 {i + 1} 則等不到回應（{type(e).__name__}），可能已送達，不重送", file=sys.stderr)
+                    break
                 print(f"第 {i + 1} 則送出失敗：{type(e).__name__} {code}", file=sys.stderr)
                 if attempt == 2 or (isinstance(code, int) and 400 <= code < 500 and code != 429):
                     failed += 1  # 400/401/403 之類重試也沒用
@@ -90,6 +95,11 @@ def send(messages: list[str], token: str, chat_id: str) -> tuple[int, int]:
                 time.sleep(_retry_after(e) if code == 429 else 3)
         time.sleep(1.1)  # Telegram 對同一個聊天大約每秒 1 則（群組每分鐘 20 則，超過會回 429）
     return len(messages) - failed, failed
+
+
+def _timed_out(e: Exception) -> bool:
+    """逾時（連線建立後等不到回應）。連線階段逾時也一併當成可能已送達，不重送。"""
+    return isinstance(e, (socket.timeout, TimeoutError)) or isinstance(getattr(e, "reason", None), (socket.timeout, TimeoutError))
 
 
 def _retry_after(e: Exception) -> float:
