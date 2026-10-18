@@ -7,6 +7,7 @@
 
 | 日期 | 報告 | 一句話結論 |
 |---|---|---|
+| 10-18 | [BTC 跌破 EMA200 不做多](signals/report_bear_nolong_20261018.md) | 被擋掉的多單平均 +0.09R，10 種寫法 Sharpe 都略低；只在 2022 讓回撤變小，不建議加 |
 | 10-18 | [牛熊濾網](signals/report_regime_filter_20261018.md) | BTC 日線 EMA200、200 週均線分牛熊都讓績效變差；牛市裡的空單是最賺的一群，不加濾網 |
 | 10-15 | [出場統一、同幣只做一張](signals/report_vegas_trend_exit_unify_20261015.md) | 4H 改用 2H 的 1/3/5R 出場 Sharpe 一樣或較好；同幣同向只做一張總獲利少約兩成、回撤小約 4 個百分點 |
 | 10-15 | [止損單共同特徵](signals/report_vegas_trend_stoploss_profile_20261015.md) | 近期止損單偏「大 K、爆量」，但這群歷史上最賺；沒有特徵能預測止損，規則不改，建議設總風險上限 |
