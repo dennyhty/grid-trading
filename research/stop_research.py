@@ -43,7 +43,7 @@ import pandas as pd
 from numba import njit
 
 from grid_trading import indicators as ind
-from grid_trading.binance_history import load
+from grid_trading.binance_history import load, load_extended
 from grid_trading.history import resample
 from grid_trading.signals.strategy import LONG
 from grid_trading.signals.vegas_trend import VegasTrend
@@ -285,9 +285,10 @@ def load_frame(coin: str, interval: str, source: str) -> pd.DataFrame:
             if len(df):
                 df = resample(df, "2h", origin="epoch")
         return df.reset_index(drop=True)
+    get = load_extended if source == "binance_ext" else load  # binance_ext：合約上市前接現貨（2017-08 起）
     if interval == "4H":
-        return load(coin, "4h")
-    df = load(coin, "1h")
+        return get(coin, "4h")
+    df = get(coin, "1h")
     if len(df):
         df = resample(df, "2h", origin="epoch")
     return df.reset_index(drop=True)

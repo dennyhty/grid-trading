@@ -2,6 +2,7 @@
 
 python -m research.exit_unify --source binance      # 先產生 output/exit_unify_trades_binance.csv.gz
 python -m research.yearly_returns                   → output/yearly_returns.csv、output/equity_curve.csv
+python -m research.yearly_returns --source binance_ext   （合約上市前接現貨，2017-08 起）→ 檔名加 _binance_ext
 
 實盤規則（2026-10-15 起）：4H 和 2H 都用 1/3/5R 各平 1/4 的出場，同一個幣同方向只做一張（2H 同時出現時優先）。
 每筆風險 0.25%，損益算在出場那天、那一年。
@@ -12,17 +13,19 @@ python -m research.yearly_returns                   → output/yearly_returns.cs
 
 from __future__ import annotations
 
+import argparse
+
 import numpy as np
 import pandas as pd
 
-from grid_trading.binance_history import load
+from grid_trading.binance_history import load_extended
 from research.exit_unify import dedupe, per_interval
 
 RISK = 0.0025
 
 
-def books() -> dict[str, pd.DataFrame]:
-    allt = pd.read_csv("output/exit_unify_trades_binance.csv.gz")
+def books(source: str = "binance") -> dict[str, pd.DataFrame]:
+    allt = pd.read_csv(f"output/exit_unify_trades_{source}.csv.gz")
     for c in ("time", "exit_t"):
         allt[c] = pd.to_datetime(allt[c], utc=True)
     live = {iv: per_interval(allt[(allt["interval"] == iv) & (allt["style"] == "2H式")]) for iv in ("4H", "2H")}
@@ -39,14 +42,14 @@ def yearly(tr: pd.DataFrame) -> pd.DataFrame:
     rows = []
     for y, g in tr.groupby(tr["exit_t"].dt.year):
         r = g["r"].to_numpy()
-        rows.append({"year": y, "trades": len(g), "win_rate": (r > 0).mean(), "exp_r": r.mean(), "sum_r": r.sum(),
+        rows.append({"year": y, "trades": len(g), "coins": g["coin"].nunique(), "win_rate": (r > 0).mean(), "exp_r": r.mean(), "sum_r": r.sum(),
                      "simple_pct": r.sum() * RISK * 100, "compound_pct": (np.prod(1 + RISK * r) - 1) * 100,
                      "max_dd_pct": max_dd(r) * 100,
                      "first_exit": g["exit_t"].min().date(), "last_exit": g["exit_t"].max().date()})
     r = tr["r"].to_numpy()
     years = (tr["exit_t"].max() - tr["time"].min()).days / 365.25
     comp = np.prod(1 + RISK * r)
-    rows.append({"year": "全期", "trades": len(tr), "win_rate": (r > 0).mean(), "exp_r": r.mean(), "sum_r": r.sum(),
+    rows.append({"year": "全期", "trades": len(tr), "coins": tr["coin"].nunique(), "win_rate": (r > 0).mean(), "exp_r": r.mean(), "sum_r": r.sum(),
                  "simple_pct": r.sum() * RISK * 100, "compound_pct": (comp - 1) * 100, "max_dd_pct": max_dd(r) * 100,
                  "simple_per_year_pct": r.sum() * RISK * 100 / years, "cagr_pct": (comp ** (1 / years) - 1) * 100,
                  "years": years, "first_exit": tr["time"].min().date(), "last_exit": tr["exit_t"].max().date()})
@@ -62,7 +65,7 @@ def curve(tr: pd.DataFrame, days: pd.DatetimeIndex) -> pd.DataFrame:
 
 
 def btc_yearly(start, end) -> pd.Series:
-    c = load("BTC", "4h").set_index("time")["close"]
+    c = load_extended("BTC", "4h").set_index("time")["close"]
     c = c[(c.index >= start) & (c.index < end + pd.Timedelta(days=1))]
     last = c.groupby(c.index.year).last()
     first = c.iloc[0]
@@ -71,7 +74,11 @@ def btc_yearly(start, end) -> pd.Series:
 
 
 def main() -> None:
-    bk = books()
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--source", default="binance", choices=["binance", "binance_ext"])
+    args = ap.parse_args()
+    suffix = "" if args.source == "binance" else f"_{args.source}"
+    bk = books(args.source)
     t0 = min(b["time"].min() for b in bk.values()).floor("D")
     t1 = max(b["exit_t"].max() for b in bk.values()).floor("D")
     days = pd.date_range(t0, t1, freq="D")
@@ -86,10 +93,10 @@ def main() -> None:
     out = pd.concat(ys, ignore_index=True)
     btc = btc_yearly(t0, t1)
     out["btc_pct"] = out["year"].map(lambda y: btc.get(y, np.nan) if y != "全期" else np.nan)
-    out.to_csv("output/yearly_returns.csv", index=False)
+    out.to_csv(f"output/yearly_returns{suffix}.csv", index=False)
     cv = pd.concat(cs, axis=1)
     cv.index.name = "date"
-    cv.to_csv("output/equity_curve.csv")
+    cv.to_csv(f"output/equity_curve{suffix}.csv")
     with pd.option_context("display.width", 250, "display.max_columns", 30):
         print(out.round(3).to_string())
 
