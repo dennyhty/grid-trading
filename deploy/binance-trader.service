@@ -1,0 +1,16 @@
+# 幣安自動交易（systemd 範本）。%i 是模式：paper / testnet / live。安裝方法見 docs/binance_bot.md
+[Unit]
+Description=Binance vegas_trend trader (%i)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=trader
+WorkingDirectory=/home/trader/grid-trading
+EnvironmentFile=-/home/trader/trader.env
+ExecStart=/home/trader/grid-trading/.venv/bin/python binance_trader.py --mode %i
+Restart=always
+RestartSec=30
+
+[Install]
+WantedBy=multi-user.target
