@@ -173,6 +173,10 @@ class Trader:
         for iv in self.due(now):
             close = bar_close(now, iv)
             sigs = self.find_signals(iv, close)
+            # 沒訊號也印一行，看紀錄就知道每根收盤都有掃（不推 Telegram）
+            print(time.strftime("%Y-%m-%d %H:%M:%S"),
+                  f"{iv} 收盤 {close:%m-%d %H:%M} UTC 掃描完成：{len(sigs)} 個訊號，持倉 {len(self.store.positions)} 張",
+                  flush=True)
             for sig in sigs:
                 self.try_open(sig)
             self.store.processed[iv] = int(close.timestamp() * 1000)
