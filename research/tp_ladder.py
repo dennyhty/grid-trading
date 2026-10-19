@@ -1,4 +1,4 @@
-"""vegas_trend：比較四組止盈階梯 1/2/3R、1/3/5R（現在）、2/4/6R、1/2/4R（只做分析，不改實盤規則）。
+"""vegas_trend：比較止盈階梯 1/2/3R、1/3/5R（現在）、2/4/6R、1/2/4R，和一次全平的 1:1、1:1.5（只做分析，不改實盤規則）。
 
 python -m research.tp_ladder --source binance_ext   （合約上市前接幣安現貨，2017-08 起，主）
 python -m research.tp_ladder --source pionex        （派網 2023 起，輔）
@@ -26,12 +26,14 @@ from grid_trading.universe import TOP100
 from research.exit_unify import dedupe, per_interval
 from research.stop_research import LIVE_ATR, MAX_BARS, MIN_STOP_PCT, cluster_key, cluster_stats, load_frame, sim_many
 
-PORTIONS, TRAIL_K, PROTECT = (0.25, 0.25, 0.25), 3.0, 0  # protect 0 = 實盤：TP1 保本、TP2 移到 TP1
-MODES = {  # 名稱 → 三個止盈（R）；第一個是現在實盤，成對差都跟它比
-    "1/3/5R（現在）": (1.0, 3.0, 5.0),
-    "1/2/3R": (1.0, 2.0, 3.0),
-    "2/4/6R": (2.0, 4.0, 6.0),
-    "1/2/4R": (1.0, 2.0, 4.0),
+Q, TRAIL_K, PROTECT = (0.25, 0.25, 0.25), 3.0, 0  # protect 0 = 實盤：TP1 保本、TP2 移到 TP1
+MODES = {  # 名稱 → (三個止盈（R）, 每個 TP 平幾成)；第一個是現在實盤，成對差都跟它比
+    "1/3/5R（現在）": ((1.0, 3.0, 5.0), Q),
+    "1/2/3R": ((1.0, 2.0, 3.0), Q),
+    "2/4/6R": ((2.0, 4.0, 6.0), Q),
+    "1/2/4R": ((1.0, 2.0, 4.0), Q),
+    "1:1 全平": ((1.0, 2.0, 3.0), (1.0, 0.0, 0.0)),  # 1R 一次全平，沒有保本和追蹤
+    "1:1.5 全平": ((1.5, 2.0, 3.0), (1.0, 0.0, 0.0)),  # 1.5R 一次全平
 }
 RISK = 0.0025
 
@@ -63,9 +65,9 @@ def _work(args):
     isc = np.ones(len(hi), np.bool_)
     t = pd.to_datetime(p["time"], utc=True)
     rows = []
-    for name, tp_r in MODES.items():
+    for name, (tp_r, portions) in MODES.items():
         tps = np.stack([price + ds * k * risk for k in tp_r], axis=1)
-        r, hit, j, kind, _ = sim_many(op, hi, lo, cl, isc, idx + 1, ds, price, risk, stop0, tps, np.array(PORTIONS),
+        r, hit, j, kind, _ = sim_many(op, hi, lo, cl, isc, idx + 1, ds, price, risk, stop0, tps, np.array(portions),
                                       PROTECT, TRAIL_K * a, fee, 0.0, MAX_BARS, 0, 0, zero, 0.0, 0.0, zero, 0, cl, cl, False)
         rows.append(pd.DataFrame({"coin": coin, "interval": interval, "mode": name, "i": idx, "side": ds,
                                   "time": t.iloc[idx + 1].to_numpy(), "exit_t": t.iloc[np.minimum(j, len(t) - 1)].to_numpy(),
