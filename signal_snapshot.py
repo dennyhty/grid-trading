@@ -55,7 +55,29 @@ def closing_intervals(intervals: list[str], now_ms: int, within_ms: int = 10 * 6
     return [iv for iv in intervals if now_ms % INTERVAL_MS[iv] < within_ms]
 
 
-def early_push(args, symbols: list[str], data: Path, previous: dict, blocked: dict, sent_path: Path) -> dict:
+# 2026-10-18 以前沒有「上一次掃到哪根 K 線」的紀錄，EMA 微幅漂移讓幾天前的訊號事後冒出來、
+# 被當成新單記下（只記不推播）。第一次用新紀錄時，把這段期間這樣冒出來的實盤訊號拿掉
+LATE_SINCE_MS = 1_792_108_800_000  # 2026-10-16 00:00 UTC：在這之後沒有新加的週期或策略要補掃
+
+
+def retract_late(prev_state: dict, notifications: list[dict], ledger: list[dict]) -> set[str]:
+    """上一次的 state.json 還沒有 scanned（這個功能上線後第一次）時，找出事後才冒出來的實盤訊號：
+    第一次出現就已經晚了 3 根 K 線以上、只記不推播的 NEW。回傳它們的 id，並從通知和實盤紀錄裡拿掉。"""
+    if "scanned" in prev_state or not prev_state.get("signals"):
+        return set()
+    late = set()
+    for n in notifications:
+        iv = n["signal_id"].split("|")[1] if n["signal_id"].count("|") >= 3 else ""
+        if (n["kind"] == "NEW" and n.get("initial") and not n.get("observe") and iv in INTERVAL_MS
+                and n["created"] >= LATE_SINCE_MS and n["created"] - n["time"] > 3 * INTERVAL_MS[iv]):
+            late.add(n["signal_id"])
+    notifications[:] = [n for n in notifications if n["signal_id"] not in late]
+    ledger[:] = [e for e in ledger if e["id"] not in late]
+    return late
+
+
+def early_push(args, symbols: list[str], data: Path, previous: dict, blocked: dict, sent_path: Path,
+               scanned: dict) -> dict:
     """2H/4H 剛收盤時先只掃加密貨幣的實盤策略（沒有 tag 的），新通知馬上送 Telegram，不等整個網站產生和部署完。
 
     抓到的 K 線回傳給完整掃描沿用，不多打派網。通知 id 和完整掃描算出來的一樣，所以送過的寫到 sent_path，
@@ -80,6 +102,7 @@ def early_push(args, symbols: list[str], data: Path, previous: dict, blocked: di
     quick.previous = {k: s for k, s in previous.items()
                       if s.get("symbol") in set(crypto) and s.get("strategy") in live}
     quick.blocked = dict(blocked)
+    quick.scanned = dict(scanned)
     quick.scan_once()
     state = quick.state()
     msgs = telegram.messages(quick.notifications, seen, state["signals"], state["strategies"])
@@ -136,19 +159,30 @@ def main() -> int:
     # 一直開著的分頁會用 data/version.json 發現網站改版，自己重新載入，不會繼續跑舊程式
     (data / "version.json").write_text(json.dumps({"version": version}))
     (out / ".nojekyll").write_text("")
-    if args.previous and Path(args.previous).exists():
-        shutil.copy(args.previous, data / "notifications.json")
-
-    symbols = liquid_symbols(args.min_volume, tuple(args.markets), args.min_volume_rwa, args.crypto_list)
-    engine = Engine([signals.get(n) for n in args.strategies], symbols, args.intervals, args.keep_days, state_dir=data)
     try:
         prev_state = json.loads(Path(args.previous_state).read_text()) if args.previous_state else {}
     except Exception:
         prev_state = {}
-    engine.previous = {s["id"]: s for s in prev_state.get("signals", []) if "id" in s}
+    previous = json.loads(Path(args.ledger).read_text()) if args.ledger and Path(args.ledger).exists() else []
+    late: set[str] = set()
+    if args.previous and Path(args.previous).exists():
+        notes = json.loads(Path(args.previous).read_text())
+        late = retract_late(prev_state, notes, previous)
+        if late:
+            print(f"拿掉事後才冒出來的訊號：{sorted(late)}", file=sys.stderr)
+        (data / "notifications.json").write_text(json.dumps(notes, ensure_ascii=False))
+
+    symbols = liquid_symbols(args.min_volume, tuple(args.markets), args.min_volume_rwa, args.crypto_list)
+    engine = Engine([signals.get(n) for n in args.strategies], symbols, args.intervals, args.keep_days, state_dir=data)
+    engine.previous = {s["id"]: s for s in prev_state.get("signals", []) if "id" in s and s["id"] not in late}
     engine.blocked = dict(prev_state.get("blocked") or {})
+    engine.scanned = dict(prev_state.get("scanned") or {})
+    if not engine.scanned and prev_state.get("updated"):
+        # 上一次的 state.json 還沒有 scanned：當成上一次每個幣、週期都掃到它更新的時間
+        engine.scanned = {f"{s}|{iv}": prev_state["updated"] for s in symbols for iv in args.intervals}
     if args.early_push:
-        engine.prefetched = early_push(args, symbols, data, engine.previous, engine.blocked, Path(args.early_push))
+        engine.prefetched = early_push(args, symbols, data, engine.previous, engine.blocked, Path(args.early_push),
+                                       engine.scanned)
     engine.scan_once()
     if engine.failed:
         sample = sorted(set(engine.errors.values()))[:3]
@@ -160,7 +194,6 @@ def main() -> int:
     state = engine.state()
     state["static"] = True
 
-    previous = json.loads(Path(args.ledger).read_text()) if args.ledger and Path(args.ledger).exists() else []
     book = ledger_mod.update(previous, state["signals"], lambda sym, iv: engine.klines(sym, iv, 1000),
                              engine.fee)
     write_json(data / "ledger.json", book)
