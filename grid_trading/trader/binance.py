@@ -153,6 +153,10 @@ class BinanceFutures:
             if e.status != 400:  # 已經觸發或取消過的單會回 400，當作取消成功
                 raise
 
+    def algo_order(self, algo_id) -> dict:
+        """查一張條件單（含已觸發、已取消的）；algoStatus 是 TRIGGERED / FINISHED 表示已成交。"""
+        return self._request("GET", "/fapi/v1/algoOrder", {"algoId": algo_id}, signed=True)
+
     def open_conditionals(self, symbol: str) -> list[dict]:
         data = self._request("GET", "/fapi/v1/openAlgoOrders", {"symbol": symbol}, signed=True)
         return data if isinstance(data, list) else data.get("orders", [])

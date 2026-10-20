@@ -81,6 +81,7 @@ class FakeExchange:
         self.pnl = 0.0
         self.hedge = False
         self.fail_stop = False
+        self.done = {}
 
     # 行情
     def klines(self, symbol, interval, limit=500):
@@ -125,7 +126,13 @@ class FakeExchange:
         return {"algoId": oid}
 
     def cancel_conditional(self, oid):
-        self.algo.pop(oid, None)
+        o = self.algo.pop(oid, None)
+        if o:
+            self.done[oid] = {**o, "algoStatus": "CANCELED"}
+
+    def algo_order(self, oid):
+        o = self.done[oid]
+        return {"algoStatus": o["algoStatus"], "triggerPrice": str(o["trigger"]), "actualPrice": "0"}
 
     def open_conditionals(self, symbol):
         return [o for o in self.algo.values() if o["symbol"] == symbol]
@@ -133,12 +140,13 @@ class FakeExchange:
     def realized_since(self, symbol, ps, start):
         return self.pnl
 
-    def trigger(self, kind, n=0):
-        """讓第 n 張某類條件單成交。"""
-        o = [o for o in self.algo.values() if o["type"] == kind][n]
+    def trigger(self, kind, n=0, oid=None):
+        """讓第 n 張某類條件單（或指定 id）成交。"""
+        o = self.algo[oid] if oid else [o for o in self.algo.values() if o["type"] == kind][n]
         key = (o["symbol"], o["ps"])
         self.pos[key] -= self.pos[key] if o["qty"] is None else o["qty"]
         del self.algo[o["algoId"]]
+        self.done[o["algoId"]] = {**o, "algoStatus": "FINISHED"}
 
 
 def make_signal(side=LONG, price=100.0, risk=4.0, interval="2H", t=T0):
@@ -167,7 +175,7 @@ def test_live_open_places_stop_and_three_tps(tmp_path):
     kinds = sorted(o["type"] for o in ex.algo.values())
     assert kinds == ["STOP_MARKET"] + ["TAKE_PROFIT_MARKET"] * 3
     stop = next(o for o in ex.algo.values() if o["type"] == "STOP_MARKET")
-    assert stop["qty"] is None  # 止損全部平倉
+    assert stop["qty"] == pytest.approx(pos["qty_f"])  # 止損用這張單自己的數量
     assert "已開倉" in sink[-1]
 
 
@@ -198,11 +206,16 @@ def test_live_moves_stop_after_each_tp_then_trails(tmp_path):
     assert stop_of() == pytest.approx(122.0)
     assert any("追蹤止損移到 122" in m for m in sink)
 
+    stop = next(o for o in ex.algo.values() if o["type"] == "STOP_MARKET")
+    assert stop["qty"] == pytest.approx(0.625 - 3 * 0.156)  # 最後剩下的那一份
     ex.trigger("STOP_MARKET")
-    ex.pnl = 5.0
     tr.step_manage(T0 + pd.Timedelta(hours=5))
-    assert not tr.store.positions and not ex.algo
-    assert tr.store.ledger[-1]["pnl"] == 5.0 and tr.store.ledger[-1]["r"] == pytest.approx(5.0 / 2.5)
+    assert not tr.store.positions and not ex.algo and not ex.positions()
+    q, rest = 0.156, 0.625 - 3 * 0.156
+    gross = q * 4 + q * 12 + q * 20 + rest * 22
+    fees = 0.0005 * (100 * 0.625 + q * (104 + 112 + 120) + rest * 122)
+    assert tr.store.ledger[-1]["pnl"] == pytest.approx(gross - fees)
+    assert tr.store.ledger[-1]["r"] == pytest.approx((gross - fees) / 2.5)
 
 
 def test_live_stop_failure_closes_position(tmp_path):
@@ -214,16 +227,29 @@ def test_live_stop_failure_closes_position(tmp_path):
     assert "已市價平倉" in sink[-1]
 
 
-def test_one_per_coin_and_side(tmp_path):
+def test_one_per_coin_and_interval(tmp_path):
     ex = FakeExchange()
     tr, sink = make_trader(tmp_path, LiveBroker(ex, ex, Config()), ex)
     tr.try_open(make_signal(interval="2H"))
-    tr.try_open(make_signal(interval="4H"))                 # 同幣同向：不做
+    tr.try_open(make_signal(side=SHORT, interval="2H"))     # 同幣同週期：一次一張
     assert len(tr.store.positions) == 1 and "已有做多單" in sink[-1]
-    tr.try_open(make_signal(side=SHORT, interval="2H"))     # 同幣同週期反向：不做（和網站一樣）
-    assert len(tr.store.positions) == 1
-    tr.try_open(make_signal(side=SHORT, interval="4H"))     # 另一個週期反向：可以
+    tr.try_open(make_signal(interval="4H"))                 # 另一個週期同方向：可以（2026-10-20 起）
     assert len(tr.store.positions) == 2
+
+
+def test_two_same_side_positions_are_managed_separately(tmp_path):
+    ex = FakeExchange(df=candles([(101, 99, 100)] * 3))
+    tr, sink = make_trader(tmp_path, LiveBroker(ex, ex, Config()), ex)
+    tr.try_open(make_signal(interval="2H"))
+    tr.try_open(make_signal(interval="4H", t=T0 + pd.Timedelta(hours=4)))
+    p2h, p4h = sorted(tr.store.positions.values(), key=lambda p: p["interval"])
+    assert ex.positions()[("XUSDT", "LONG")] == pytest.approx(1.25)  # 幣安上合成一個倉位
+    ex.trigger("STOP_MARKET", oid=p2h["stop_id"])           # 只有 2H 那張止損
+    tr.step_manage(T0 + pd.Timedelta(hours=1))
+    assert list(tr.store.positions) == [p4h["id"]]
+    assert ex.positions()[("XUSDT", "LONG")] == pytest.approx(0.625)
+    assert tr.store.ledger[-1]["interval"] == "2H" and tr.store.ledger[-1]["pnl"] < 0
+    assert sum(o["type"] == "TAKE_PROFIT_MARKET" for o in ex.algo.values()) == 3  # 2H 的止盈已取消
 
 
 def test_max_open_and_pause(tmp_path):
