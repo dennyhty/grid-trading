@@ -8,3 +8,4 @@ output/
 *.key
 data/
 site/
+trader_state/
