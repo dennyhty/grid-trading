@@ -1,48 +1,7 @@
-import time
-
 import numpy as np
 import pandas as pd
 
 from grid_trading import signals
-from grid_trading.signals.engine import Engine
-
-
-def _klines(n, start_ms, step_ms=3_600_000, price=None):
-    price = np.linspace(100, 130, n) if price is None else price
-    return {"klines": [{"time": start_ms + i * step_ms, "open": p, "high": p * 1.002, "low": p * 0.998,
-                        "close": p, "volume": 1} for i, p in enumerate(price)]}
-
-
-def test_1h_and_2h_share_one_1h_fetch(tmp_path, monkeypatch):
-    import grid_trading.signals.engine as eng_mod
-
-    calls = []
-
-    class FakeApi:
-        def _get(self, path, params):
-            calls.append((params["symbol"], params["interval"]))
-            end = params.get("endTime") or int(time.time() * 1000)
-            end -= end % 7_200_000
-            return _klines(params["limit"], end - params["limit"] * 3_600_000)
-
-    eng = Engine([], ["BTC_USDT_PERP"], ["2H", "60M"], state_dir=tmp_path)
-    monkeypatch.setattr(eng, "client", lambda: FakeApi())
-    monkeypatch.setattr(eng_mod.time, "sleep", lambda s: None)
-    frames = eng.klines_many([("BTC_USDT_PERP", "2H"), ("BTC_USDT_PERP", "60M")])
-    assert {iv for _, iv in calls} == {"60M"}  # 2H 不另外抓
-    assert len(calls) == 2  # 1000 根 1H = 兩頁，1H 和 2H 共用
-    assert len(frames[("BTC_USDT_PERP", "60M")]) == 1000 and len(frames[("BTC_USDT_PERP", "2H")]) == 500
-
-    # 只掃 2H 時也把抓到的 1H 留下，下一個 Engine（完整掃描）不用再抓
-    calls.clear()
-    quick = Engine([], ["BTC_USDT_PERP"], ["2H"], state_dir=tmp_path)
-    monkeypatch.setattr(quick, "client", lambda: FakeApi())
-    got = quick.klines_many([("BTC_USDT_PERP", "2H")])
-    assert ("BTC_USDT_PERP", "60M") in got
-    n = len(calls)
-    eng.prefetched = got
-    eng.klines_many([("BTC_USDT_PERP", "2H"), ("BTC_USDT_PERP", "60M")])
-    assert len(calls) == n
 
 
 def test_breakout_is_an_observation_group_and_vegas_skips_1h():

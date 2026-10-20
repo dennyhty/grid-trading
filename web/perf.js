@@ -367,7 +367,7 @@
     el.innerHTML = `
       <div class="panel">
         <h3>策略研究</h3>
-        <p class="muted">每個想法都用幣安 2020 年起（部分 2017 年起）的資料回測，前後兩段互相驗證，再用派網資料複核。
+        <p class="muted">每個想法都用幣安 2020 年起（部分 2017 年起）的資料回測，前後兩段互相驗證。
         上線條件：兩段時期都賺、同日同向合併後 t ≥ 2、贏過隨機進場。共 ${all.length} 份報告。</p>
         <div class="funnel">${["live", "observe", "pending", "rejected"].map((s) => `<div class="${STATUS_CLASS[s]}"><b>${count(s)}</b><span>${R.status[s]}</span></div>`).join("")}</div>
         <input id="rs-q" class="search" placeholder="搜尋報告（例如 止損、SMC、回撤）" value="${h(query)}">

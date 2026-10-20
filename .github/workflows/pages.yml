@@ -1,5 +1,5 @@
 # 每 15 分鐘掃描一次訊號，把網頁和資料直接發佈到 GitHub Pages。
-# 只用公開行情（派網 K 線；訂單流觀察組另外讀幣安的公開持倉量），不需要任何金鑰。
+# 只用幣安 USDT 永續合約的公開 K 線（www.binance.com/fapi；fapi.binance.com 從 GitHub 連會被擋），不需要任何金鑰。
 # 需要的設定：Settings → Pages → Source 選「GitHub Actions」。
 name: 訊號網頁
 
