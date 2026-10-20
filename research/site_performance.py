@@ -193,6 +193,10 @@ def main() -> None:
                                                  for iv, g in tr.groupby("interval")}
     a.out.parent.mkdir(parents=True, exist_ok=True)
     a.out.write_text(json.dumps(clean(out), ensure_ascii=False, separators=(",", ":")))
+    # 訊號頁上方那一行摘要用的小檔（不用載整份回測）
+    keys = ("trades", "win_rate", "avg_r", "profit_factor", "max_dd_pct", "cagr_pct", "simple_per_year_pct", "start", "end")
+    summary = {name: {k: out["books"][name]["metrics"].get(k) for k in keys} for name in BOOKS}
+    a.out.with_name("summary.json").write_text(json.dumps(clean(summary), ensure_ascii=False))
     m = out["books"]["4H+2H"]["metrics"]
     print(f"{a.out}：{m['trades']} 筆，每筆 {m['avg_r']:+.3f}R，單利 {m['simple_per_year_pct']:+.1f}%/年，"
           f"CAGR {m['cagr_pct']:+.1f}%，回撤 {m['max_dd_pct']:.1f}%，Sharpe {m['sharpe']:.2f}")

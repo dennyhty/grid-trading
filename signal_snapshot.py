@@ -1,7 +1,8 @@
 """產生靜態網站用的資料快照：python signal_snapshot.py --out site
 
-給 GitHub Pages 用。GitHub Actions 每隔幾分鐘跑一次：掃描訊號、寫出 JSON，
-網頁（web/）直接讀這些 JSON，不需要一直開著的伺服器。
+給 GitHub Pages 用。GitHub Actions 每 15 分鐘跑一次：用幣安 USDT 永續合約的 K 線掃描實盤維加斯 4H / 2H、
+寫出 JSON，網頁（web/）直接讀這些 JSON，不需要一直開著的伺服器。2026-10-20 起只用幣安（和 VPS 上的自動交易同一份合約名單），
+派網、觀察組、美股/商品都不再掃描。
 
 輸出：
   <out>/data/state.json                    訊號、通知、回測數字（同 /api/state）
@@ -25,11 +26,11 @@ from pathlib import Path
 
 from grid_trading import signals
 import signal_telegram as telegram
-from grid_trading.markets import COMMODITY, CRYPTO, STOCK, classify
-from grid_trading.pionex import PionexPublic
+from grid_trading.binance_history import binance_symbols
+from grid_trading.binance_public import from_binance, universe
+from grid_trading.markets import CRYPTO, classify
 from grid_trading.signals import ledger as ledger_mod
 from grid_trading.signals.engine import INTERVAL_MS, Engine
-from signal_backtest import liquid_symbols
 from signal_server import _sanitize
 
 CHART_INTERVALS = ["15M", "60M", "4H", "1D"]
@@ -38,16 +39,6 @@ CHART_INTERVALS = ["15M", "60M", "4H", "1D"]
 def write_json(path: Path, obj) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(_sanitize(obj), ensure_ascii=False, separators=(",", ":"), allow_nan=False))
-
-
-def order_specs(symbols: set[str], previous: dict) -> dict:
-    """網頁「下單計算」用的派網最小下單量；抓不到就沿用上一次的。"""
-    try:
-        specs = PionexPublic().perp_specs()
-    except Exception as e:
-        print(f"注意：派網下單限制抓不到（{e}），沿用上一次的", file=sys.stderr)
-        specs = previous
-    return {s: specs[s] for s in sorted(symbols) if s in specs}
 
 
 def closing_intervals(intervals: list[str], now_ms: int, within_ms: int = 10 * 60_000) -> list[str]:
@@ -80,7 +71,7 @@ def early_push(args, symbols: list[str], data: Path, previous: dict, blocked: di
                scanned: dict) -> dict:
     """2H/4H 剛收盤時先只掃加密貨幣的實盤策略（沒有 tag 的），新通知馬上送 Telegram，不等整個網站產生和部署完。
 
-    抓到的 K 線回傳給完整掃描沿用，不多打派網。通知 id 和完整掃描算出來的一樣，所以送過的寫到 sent_path，
+    抓到的 K 線回傳給完整掃描沿用，不多打幣安。通知 id 和完整掃描算出來的一樣，所以送過的寫到 sent_path，
     之後的 outbox 跳過。萬一這一輪網站沒部署成功，下一輪會再送一次（寧可重複，不要漏）。"""
     sent_path.write_text("[]")
     live = [n for n in args.strategies if not signals.get(n).tag]
@@ -123,21 +114,15 @@ def main() -> int:
     p.add_argument("--web", default="web", help="網頁原始檔，會複製到 --out")
     p.add_argument("--previous", help="上一次的 notifications.json，用來接續通知紀錄")
     p.add_argument("--ledger", help="上一次的 ledger.json（實盤紀錄），沒有就從頭開始")
-    p.add_argument("--strategies", nargs="+", default=["vegas_trend", "smc_sweep", "smc_sweep_2h", "oi_build", "oi_build_2h",
-                                                     "breakout_momentum"], choices=sorted(signals.REGISTRY))
-    p.add_argument("--intervals", nargs="+", default=["4H", "2H", "60M"])
-    p.add_argument("--crypto-list", choices=["top100", "volume"], default="top100",
-                   help="加密貨幣：市值前 100 名（預設），或 24h 成交額 >= --min-volume")
-    p.add_argument("--min-volume", type=float, default=5e6, help="加密貨幣 24h 成交額下限 (USDT)")
-    p.add_argument("--min-volume-rwa", type=float, default=3e5, help="美股/商品 24h 成交額下限 (USDT)")
-    p.add_argument("--markets", nargs="+", default=[CRYPTO, STOCK, COMMODITY], choices=[CRYPTO, STOCK, COMMODITY])
+    p.add_argument("--strategies", nargs="+", default=["vegas_trend"], choices=sorted(signals.REGISTRY))
+    p.add_argument("--intervals", nargs="+", default=["4H", "2H"])
     p.add_argument("--keep-days", type=float, default=7)
     p.add_argument("--previous-state", help="上一次的 state.json；這次 K 線沒抓到的（幣, 週期）沿用裡面的訊號")
     p.add_argument("--early-push", metavar="SENT_JSON",
                    help="2H/4H 剛收盤時，先只掃加密貨幣的實盤策略、馬上把新通知送到 Telegram（要有 TELEGRAM_BOT_TOKEN / "
                         "TELEGRAM_CHAT_ID），送過的通知 id 寫到這個檔，之後的 outbox 會跳過")
     p.add_argument("--max-failed", type=float, default=0.5,
-                   help="K 線抓不到的（幣, 週期）超過這個比例（大概是派網整個連不上）就不輸出，網站保留上一版")
+                   help="K 線抓不到的（幣, 週期）超過這個比例（大概是幣安整個連不上）就不輸出，網站保留上一版")
     args = p.parse_args()
 
     out = Path(args.out)
@@ -176,11 +161,18 @@ def main() -> int:
             print(f"拿掉事後才冒出來的訊號：{sorted(late)}", file=sys.stderr)
         (data / "notifications.json").write_text(json.dumps(notes, ensure_ascii=False))
 
-    symbols = liquid_symbols(args.min_volume, tuple(args.markets), args.min_volume_rwa, args.crypto_list)
+    symbols = universe()
     engine = Engine([signals.get(n) for n in args.strategies], symbols, args.intervals, args.keep_days, state_dir=data)
     engine.previous = {s["id"]: s for s in prev_state.get("signals", []) if "id" in s and s["id"] not in late}
     engine.blocked = dict(prev_state.get("blocked") or {})
     engine.scanned = dict(prev_state.get("scanned") or {})
+    # 派網時代的代號換成幣安合約名稱的（PEPE → 1000PEPE、SHIB → 1000SHIB）：沿用掃到哪根 K 線的紀錄，
+    # 舊 K 線上的訊號才不會被當成新訊號
+    for key, t in list(engine.scanned.items()):
+        sym, iv = key.split("|", 1)
+        new = from_binance(binance_symbols(sym.split("_")[0])[-1])
+        if new != sym and new in symbols:
+            engine.scanned.setdefault(f"{new}|{iv}", t)
     if not engine.scanned and prev_state.get("updated"):
         # 上一次的 state.json 還沒有 scanned：當成上一次每個幣、週期都掃到它更新的時間
         engine.scanned = {f"{s}|{iv}": prev_state["updated"] for s in symbols for iv in args.intervals}
@@ -193,23 +185,23 @@ def main() -> int:
         print(f"注意：{len(engine.failed)} 組 K 線重試後仍抓不到，沿用上一次的 {engine.carried} 個訊號。"
               f"例如 {engine.failed[:5]}；錯誤 {sample}", file=sys.stderr)
     if len(engine.failed) > args.max_failed * len(symbols) * len(args.intervals):
-        print("抓不到的太多（大概是派網連不上），這次不更新網站", file=sys.stderr)
+        print("抓不到的太多（大概是幣安連不上），這次不更新網站", file=sys.stderr)
         return 1
     state = engine.state()
     state["static"] = True
+    state["source"] = "binance"
 
     book = ledger_mod.update(previous, state["signals"], lambda sym, iv: engine.klines(sym, iv, 1000),
                              engine.fee)
     write_json(data / "ledger.json", book)
     state["ledger"] = ledger_mod.summary(book)
-    state["specs"] = order_specs({s["symbol"] for s in state["signals"]}, prev_state.get("specs") or {})
     write_json(data / "state.json", state)
 
     pairs = {(s["symbol"], s["interval"], s["strategy"]) for s in state["signals"]}
     charts: dict[tuple[str, str], tuple[str, int]] = {}  # (幣, 週期) → (策略, 根數)；訊號本身的週期多抓一些
     for sym, sig_iv, strat in sorted(pairs):
         for iv in dict.fromkeys([sig_iv, *CHART_INTERVALS]):
-            bars = 1000 if iv == sig_iv else 500  # 其他週期只抓一頁（500 根），減少對派網的請求
+            bars = 1000 if iv == sig_iv else 500
             if charts.get((sym, iv), ("", 0))[1] < bars:
                 charts[(sym, iv)] = (strat, bars)
 

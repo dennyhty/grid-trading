@@ -4,7 +4,7 @@
 
 | 分頁 | 內容 | 資料從哪來 |
 | --- | --- | --- |
-| 訊號 | 加密貨幣 / 美股 / 商品的訊號列表、圖表、下單計算（原本的網站） | `signal_snapshot.py` 每 15 分鐘掃描，`data/state.json` |
+| 訊號 | 幣安 USDT 永續的實盤維加斯 4H / 2H 訊號列表和圖表；上方一行回測摘要（`web/perf/summary.json`）和網站訊號紀錄 | `signal_snapshot.py` 每 15 分鐘用幣安 K 線掃描，`data/state.json` |
 | 績效 → 幣安自動交易 | VPS 上自動交易的實際紀錄：勝率、平均 R、累計 R、已實現損益、回撤、持倉、最近平倉 | VPS 的 `deploy/trader_feed.py` → GitHub secret `TRADER_FEED_URL` → `data/trader.json` |
 | 績效 → 維加斯回測 | 實盤規則回測：CAGR、單利年化、最大回撤、Sharpe、Sortino、Calmar、勝率、獲利因子、資金曲線、回撤、滾動期望值、逐年、每月、多空拆開、R 分布 | `web/perf/vegas_backtest.json`（`research/site_performance.py` 產生，固定資料） |
 | 策略研究 | 所有研究報告的索引（已上線 / 觀察組 / 待決定 / 不採用）和全文 | `web/perf/research.json` + `reports/**/*.md` |

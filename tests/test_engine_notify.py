@@ -30,20 +30,27 @@ def test_old_signals_from_a_new_interval_are_recorded_quietly(tmp_path):
     assert len(tp2) == 1 and tp2[0]["initial"] is False
 
 
-def test_2h_klines_are_built_from_1h():
-    import pandas as pd
+def _rows(n, start_ms, step_ms=7_200_000):
+    return [[start_ms + i * step_ms, str(i), str(i + 1), str(i - 1), str(i + 0.5), "1", 0, "0", 0, "0", "0", "0"]
+            for i in range(n)]
 
+
+def test_binance_klines_page_backwards():
     class FakeApi:
-        def _get(self, path, params):
-            assert params["interval"] == "60M"
-            start = 1_700_000_000_000 - 1_700_000_000_000 % 7_200_000
-            return {"klines": [{"time": start + i * 3_600_000, "open": i, "high": i + 1, "low": i - 1,
-                                "close": i + 0.5, "volume": 1} for i in range(6)]}
+        def __init__(self):
+            self.calls = []
 
-    df = fetch_klines(FakeApi(), "BTC_USDT_PERP", "2H", 3)
-    assert len(df) == 3
-    assert list(df["open"]) == [0, 2, 4] and list(df["close"]) == [1.5, 3.5, 5.5]
-    assert list(df["high"]) == [2, 4, 6] and (df["time"].diff().dropna() == pd.Timedelta(hours=2)).all()
+        def kline_rows(self, symbol, interval, limit, end=None):
+            self.calls.append((symbol, interval, limit, end))
+            top = 1_700_000_000_000 if end is None else end + 1
+            return _rows(limit, top - limit * 7_200_000)
+
+    api = FakeApi()
+    df = fetch_klines(api, "BTC_USDT_PERP", "2H", 2000)
+    assert len(df) == 2000 and df["time"].is_monotonic_increasing and df["time"].is_unique
+    assert [c[2] for c in api.calls] == [1500, 500]
+    assert api.calls[1][3] == 1_700_000_000_000 - 1500 * 7_200_000 - 1
+    assert df["close"].dtype.kind == "f"
 
 
 def test_fetch_retries_then_marks_incomplete(monkeypatch):
@@ -55,12 +62,11 @@ def test_fetch_retries_then_marks_incomplete(monkeypatch):
             self.calls = 0
             self.fail_first = fail_first
 
-        def _get(self, path, params):
+        def kline_rows(self, symbol, interval, limit, end=None):
             self.calls += 1
             if self.calls <= self.fail_first:
                 raise RuntimeError("429")
-            return {"klines": [{"time": 1_700_000_000_000 + i * 3_600_000, "open": 1, "high": 1, "low": 1,
-                                "close": 1, "volume": 1} for i in range(10)]}
+            return _rows(10, 1_700_000_000_000)
 
     ok = fetch_klines(Flaky(2), "BTC_USDT_PERP", "60M", 10)
     assert len(ok) == 10 and not ok.attrs["incomplete"]

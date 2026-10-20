@@ -36,11 +36,6 @@ select { font: inherit; color: var(--gold); background: #1f2430; border: 1px sol
 main { max-width: 720px; margin: 0 auto; padding: 12px 16px 40px; }
 .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 14px; margin-bottom: 12px; }
 
-.stats h3 { margin: 0 0 6px; font-size: 15px; }
-.stats .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 8px 0; }
-.stats .grid div { background: #12151b; border-radius: 10px; padding: 8px; }
-.stats .grid b { display: block; font-size: 17px; }
-.stats .warn { color: var(--gold); font-size: 13px; }
 
 .tabs { display: flex; gap: 8px; margin: 4px 0 12px; }
 .tab { flex: 1; }
@@ -122,29 +117,21 @@ details .kv { display: grid; grid-template-columns: auto 1fr; gap: 2px 12px; fon
   padding: calc(env(safe-area-inset-top) + 8px) 12px 12px; }
 .chart-panel.fs #chart { height: max(260px, calc(100vh - 500px)); }
 .pnl .big small, .pnl .right { white-space: nowrap; }
-.mtabs-row { margin-top: 0; }
-.mtab { flex: 1; }
-.mtab.active { background: var(--gold); color: #111; border-color: var(--gold); font-weight: 700; }
-.mtab span { font-size: 12px; opacity: .8; }
-.ivtabs { margin-top: -4px; }
+.sum-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.sum-row > div { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.sum-row b { font-size: 14px; }
+.sum-row .muted { font-size: 12px; }
+.sum-link { display: block; margin-top: 8px; font-size: 13px; color: var(--gold); text-decoration: none; }
+@media (max-width: 480px) { .sum-row { grid-template-columns: 1fr; } }
 .ivtab { flex: 1; font-size: 13px; padding: 4px 8px; }
 .ivtab.active { border-color: var(--gold); color: var(--gold); font-weight: 700; }
 .ivtab span { font-size: 12px; opacity: .8; }
-.chip.warn-chip { color: var(--gold); border-color: rgba(217,180,90,.5); }
-.chip.tag-chip { color: var(--blue); border-color: rgba(76,141,255,.5); }
 .card .row1, .dh .row1 { flex-wrap: wrap; row-gap: 4px; }
 .side, .chip, .status, .dh .dir { white-space: nowrap; }
 .groups { border-top: 1px solid var(--line); margin-top: 10px; padding-top: 8px; }
 .groups table { width: 100%; border-collapse: collapse; font-size: 13px; margin: 6px 0; }
 .groups th { text-align: left; color: var(--muted); font-weight: 400; padding: 4px 2px; }
 .groups td { padding: 5px 2px; border-top: 1px solid var(--line); vertical-align: top; }
-.size-h { margin: 0 0 8px; font-size: 15px; }
-.size-in { display: flex; flex-wrap: wrap; gap: 8px 16px; margin-bottom: 10px; color: var(--muted); font-size: 14px; }
-.size-in input { width: 84px; font: inherit; color: var(--text); background: #1f2430; border: 1px solid var(--line);
-  border-radius: 8px; padding: 5px 8px; }
-#detail-size .kv { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; font-size: 13px; }
-#detail-size .warn { color: var(--gold); font-style: normal; font-size: 12px; }
-#detail-size p { margin: 10px 0 0; }
 
 /* ---------- 分頁：訊號 / 績效 / 策略研究 ---------- */
 .nav { display: flex; justify-content: center; gap: 4px;
