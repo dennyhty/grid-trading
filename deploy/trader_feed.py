@@ -65,9 +65,12 @@ def position(p: dict, prices: dict) -> dict:
     out["signal_time"] = (p.get("signal") or {}).get("time")
     mark = prices.get(p["symbol"])
     if mark and qty and p.get("base_usdt"):
-        # 已經到的 TP 各平 1/4（照價位估），剩下的照標記價格算
-        part = sum(0.25 * qty * d * (t - p["entry"]) for t in (p.get("tps") or [])[:hits])
-        rest = qty * max(0.0, 1 - 0.25 * hits) * d * (mark - p["entry"])
+        if "remaining" in p and "fills" in p:  # 測試網/實盤：已成交的部分照成交價，剩下的照標記價格
+            part = sum(d * (price - p["entry"]) * q for q, price in p["fills"])
+            rest = float(p["remaining"]) * d * (mark - p["entry"])
+        else:  # 紙上交易：已經到的 TP 各平 1/4（照價位估），剩下的照標記價格算
+            part = sum(0.25 * qty * d * (t - p["entry"]) for t in (p.get("tps") or [])[:hits])
+            rest = qty * max(0.0, 1 - 0.25 * hits) * d * (mark - p["entry"])
         out["mark"] = mark
         out["pnl_est"] = part + rest
         out["r_est"] = (part + rest) / p["base_usdt"]
