@@ -304,3 +304,14 @@ def test_first_run_does_not_trade_old_bars(tmp_path):
     assert tr.due(now + pd.Timedelta(hours=2)) == ["2H"]   # 下一根 2H 收盤
     assert tr.due(now + pd.Timedelta(hours=4)) == ["2H", "4H"]
     assert bar_close(T0 + pd.Timedelta(hours=3), "4H") == pd.Timestamp("2026-10-19 08:00", tz="UTC")
+
+
+def test_leverage_lowered_for_wide_stops(tmp_path):
+    ex = FakeExchange()
+    calls = []
+    ex.set_leverage = lambda s, lev: calls.append(lev)
+    tr, _ = make_trader(tmp_path, LiveBroker(ex, ex, Config()), ex)
+    tr.try_open(make_signal(risk=4.0))                       # 止損 4% → 5 倍
+    tr.try_open(make_signal(risk=16.0, interval="4H"))       # 止損 16% → 3 倍（強平在約 33% 外）
+    assert calls == [5, 3]
+    assert tr.store.leverage == {"XUSDT": 3}

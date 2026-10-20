@@ -77,12 +77,14 @@ class Store:
         self.ledger: list[dict] = data.get("ledger", [])
         self.processed: dict[str, int] = data.get("processed", {})
         self.setup: list[str] = data.get("setup", [])
+        self.leverage: dict[str, int] = data.get("leverage", {})
 
     def save(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         tmp = self.path.with_suffix(".tmp")
         tmp.write_text(json.dumps({"positions": self.positions, "ledger": self.ledger,
-                                   "processed": self.processed, "setup": self.setup}, ensure_ascii=False, indent=1))
+                                   "processed": self.processed, "setup": self.setup,
+                                   "leverage": self.leverage}, ensure_ascii=False, indent=1))
         tmp.replace(self.path)
 
 
@@ -331,16 +333,24 @@ class LiveBroker:
         price = float(o.get("actualPrice") or 0) or float(o.get("triggerPrice") or 0)
         return ("filled" if st in self.FILLED else "gone"), price
 
-    def ensure_setup(self, symbol: str, store: Store) -> None:
+    def ensure_setup(self, symbol: str, store: Store, leverage: int) -> None:
+        """雙向持倉、逐倉；槓桿用 leverage（每個幣記住目前設定，要更低時才改）。"""
         if "*hedge" not in store.setup:
             if not self.client.hedge_mode():
                 self.client.set_hedge_mode()
             store.setup.append("*hedge")
         if symbol not in store.setup:
             self.client.set_isolated(symbol)
-            self.client.set_leverage(symbol, self.cfg.leverage)
             store.setup.append(symbol)
-            store.save()
+        if store.leverage.get(symbol) != leverage:
+            self.client.set_leverage(symbol, leverage)
+            store.leverage[symbol] = leverage
+        store.save()
+
+    def leverage_for(self, sig: Signal) -> int:
+        """止損越遠槓桿越低，讓強平價離進場至少是止損距離的 2 倍（槓桿 ≤ 1 / (2 × 止損%)），最多 cfg.leverage。"""
+        stop_pct = abs(sig.price - sig.sl) / sig.price
+        return max(1, min(self.cfg.leverage, int(1 / (2 * stop_pct)) if stop_pct > 0 else self.cfg.leverage))
 
     def reconcile(self, store: Store, notify) -> None:
         """啟動時比對：交易所有、狀態檔沒有的倉位只提醒，不碰；狀態檔的單止損不見（不是成交）就補掛。"""
@@ -360,7 +370,7 @@ class LiveBroker:
                 notify(f"{_pair(pos['symbol'])} 止損單不見了，已補掛在 {pos['stop']:.6g}")
 
     def open(self, sig: Signal, size, f: Filters, store: Store) -> dict | None:
-        self.ensure_setup(sig.symbol, store)
+        self.ensure_setup(sig.symbol, store, self.leverage_for(sig))
         d = sig.direction
         ps = sig.side  # 雙向持倉：LONG / SHORT
         buy, sell = ("BUY", "SELL") if d > 0 else ("SELL", "BUY")
