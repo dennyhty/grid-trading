@@ -217,7 +217,9 @@ def _pos(interval, t, side="LONG", status="OPEN", end=None, market="crypto", sym
 def _one_per_coin_engine(tmp_path, intervals=("4H", "2H")):
     import pandas as pd
     from grid_trading.signals import get
-    eng = Engine([get("vegas_trend")], [], list(intervals), state_dir=tmp_path)
+    strat = get("vegas_trend")
+    strat.one_per_coin = True  # 實盤 2026-10-20 起關掉了，這裡測機制本身
+    eng = Engine([strat], [], list(intervals), state_dir=tmp_path)
     return eng, pd.Timestamp.now(tz="UTC")
 
 

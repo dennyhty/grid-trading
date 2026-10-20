@@ -49,9 +49,9 @@ class VegasTrend(Strategy):
     }
     # 這些週期的訊號 K 棒 ADX(14) 達到門檻就不做
     MAX_ADX = {"2H": 24.0}
-    # 2026-10-15 起：加密貨幣同一個幣同方向，2H 和 4H 只做先出的那張。幣安全期交易數少 14%、每年總 R 219 → 170，
-    # Sharpe 1.67 → 1.62，最大回撤 −39.5% → −35.5%、最差一天 −37R → −31R（report_vegas_trend_exit_unify_20261015.md）
-    one_per_coin = True
+    # 2026-10-15 到 10-20 曾經「同一個幣同方向 2H、4H 只做一張」。Denny 2026-10-20 改回兩張都做：
+    # 幣安 2017-09~2026-09 每年總 R 149 → 190、Sharpe 1.59 → 1.62，最大回撤 −35.7% → −40.3%（只是押得比較重）。
+    one_per_coin = False
 
     def __init__(self, sl_atr: float = 1.5, tp_r: tuple[float, float, float] = (1.0, 2.0, 3.0),
                  max_ext_atr: float = 3.0, rsi_long: tuple[float, float] = (54, 70),
