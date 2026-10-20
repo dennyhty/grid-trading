@@ -1,4 +1,4 @@
-/* 交易訊號網頁。資料都來自本機 signal_server.py 的 /api/*，伺服器再去抓派網公開行情。 */
+/* 交易訊號網頁：幣安 USDT 永續合約的實盤維加斯 4H / 2H。資料來自 data/*.json（GitHub 排程更新）或本機 signal_server.py 的 /api/*。 */
 "use strict";
 
 const TZ = "Asia/Taipei";
@@ -24,44 +24,27 @@ function exitRuleText(s) {
 
 let state = null;
 let tab = "OPEN";
-let market = (() => { try { return localStorage.getItem("market") || "crypto"; } catch { return "crypto"; } })();
 // 週期篩選：ALL 或 state.intervals 裡的一個（"4H"、"2H"）
 let ivFilter = (() => { try { return localStorage.getItem("iv") || "ALL"; } catch { return "ALL"; } })();
-// 策略 / 觀察組：策略有 tag（例如「SMC觀察組」「訂單流觀察組」）就算觀察組，沒有 tag 的是正式策略
-let group = (() => { try { return localStorage.getItem("group") || "strategy"; } catch { return "strategy"; } })();
-/** 策略在某個類別的標籤；有標籤就是觀察組。美股、商品的維加斯用 market_tags 另外標成觀察組。 */
-const tagOf = (name, m) => { const st = state.strategies[name] || {}; return (st.market_tags || {})[m] ?? st.tag ?? ""; };
-const isObserve = (name, m = market) => !!tagOf(name, m);
-const inGroup = (name, m = market) => isObserve(name, m) === (group === "observe");
 const ivOf = (label) => (label === "1H" ? "60M" : label);
-// 目前分組（策略/觀察組）和市場裡有策略在掃的週期（例如 1H 只有加密貨幣的突破觀察組）
-const usedIvs = () => state.intervals.map(ivOf).filter((iv) => Object.entries(state.strategies).some(([name, st]) =>
-  inGroup(name) && (!st.markets || st.markets.includes(market)) && (!st.intervals || st.intervals.map(ivOf).includes(iv))));
-/** 週期篩選列。瀏覽器快取了舊版 index.html 時沒有這個元素，就自己補在市場分頁下面，免得整頁的程式停住。 */
-/** 策略 / 觀察組 切換列（放在市場分頁下面；舊版 index.html 沒有，所以由程式建立）。 */
-function groupTabsEl() {
-  let el = document.getElementById("grouptabs");
-  if (!el) {
-    el = document.createElement("div");
-    el.id = "grouptabs";
-    el.className = "tabs ivtabs hidden";
-    const row = document.querySelector(".mtabs-row");
-    if (row) row.after(el); else document.body.prepend(el);
-  }
-  return el;
-}
+const usedIvs = () => state.intervals.map(ivOf);
+/** 網站只放實盤策略（沒有觀察組標籤的）在加密貨幣上的訊號；舊資料裡的觀察組、美股/商品一律不顯示。 */
+const isLive = (name, m = "crypto") => {
+  const st = state.strategies[name];
+  return !!st && m === "crypto" && !st.tag && !(st.market_tags || {})[m];
+};
+/** 週期篩選列。瀏覽器快取了舊版 index.html 時沒有這個元素，就自己補在統計上面，免得整頁的程式停住。 */
 function ivTabsEl() {
   let el = document.getElementById("ivtabs");
   if (!el) {
     el = document.createElement("div");
     el.id = "ivtabs";
     el.className = "tabs ivtabs hidden";
-    const row = document.getElementById("grouptabs") || document.querySelector(".mtabs-row");
-    if (row) row.after(el); else document.body.prepend(el);
+    const row = document.getElementById("stats");
+    if (row) row.before(el); else document.body.prepend(el);
   }
   return el;
 }
-const MARKET_LABEL = { crypto: "加密貨幣", stock: "美股", commodity: "商品" };
 let current = null;          // 目前打開的訊號
 let chart = null, candleSeries = null, emaSeries = {}, priceLines = [];
 let ind = null; // RSI / MACD 副圖的 series
@@ -113,22 +96,10 @@ function ago(ms) {
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
 const mk = (s) => s.market || "crypto";
-/** 顯示名稱：加密貨幣是 BTC/USDT，美股是 NVDA，商品是 XAU（黃金）。 */
-function nameHtml(s, withMarket = false) {
-  if (mk(s) === "crypto") return `${pair(s.symbol).split("/")[0]}<small>/USDT</small>`;
-  return `${esc(s.name || s.symbol)}${withMarket ? `<small> ${MARKET_LABEL[mk(s)]}</small>` : ""}`;
-}
-/** 回測數字：加密貨幣存在 stats[策略][週期]，美股/商品存在 stats[策略]["類別|週期"]，
- *  幣安資料的再加「@binance」。沒指定 source 時以幣安為主，沒有才用派網。 */
-function statsFor(strategy, mkt, interval, source) {
-  const st = state.stats[strategy] || {};
-  const key = mkt === "crypto" ? interval : `${mkt}|${interval}`;
-  if (source) return st[source === "pionex" ? key : `${key}@${source}`];
-  return st[`${key}@binance`] || st[key];
-}
-const SOURCE_LABEL = { binance: "幣安資料", pionex: "派網資料" };
-const period = (s) => `${fmtTime(s.start, false).slice(0, 7)} ~ ${fmtTime(s.end, false).slice(0, 7)}`;
-const tested = (s) => !!(statsFor(s.strategy, mk(s), s.interval) || {}).all?.trades;
+const coinHtml = (s) => `${pair(s.symbol).split("/")[0]}<small>/USDT</small>`;
+/** 實盤規則回測摘要（web/perf/summary.json，research/site_performance.py 產生），key 是 4H+2H / 4H / 2H。 */
+let btSummary = {};
+const btFor = (iv) => btSummary[iv === "ALL" ? "4H+2H" : lbl(iv)];
 
 // ---------- 計算 ----------
 function dir(s) { return s.side === "LONG" ? 1 : -1; }
@@ -161,7 +132,7 @@ async function loadState() {
   return api(`data/state.json?t=${Date.now()}`);
 }
 
-/** 派網行情不允許瀏覽器直接讀，靜態網站改用 Binance U 本位合約的公開即時價（同一個幣價差通常 < 0.1%）。 */
+/** 靜態網站在瀏覽器直接抓幣安 U 本位合約的即時價（快照之後的價格變化）。 */
 async function loadLivePrices() {
   try {
     const rows = await (await fetch("https://fapi.binance.com/fapi/v1/ticker/price", { cache: "no-store" })).json();
@@ -173,10 +144,9 @@ async function loadLivePrices() {
 function applyLivePrices() {
   for (const s of state.signals) {
     s.liveSource = "snapshot";
-    if (mk(s) !== "crypto") continue; // Binance 大多沒有美股/商品，用掃描時的派網價格
     const p = livePrices[s.symbol.replace("_USDT_PERP", "USDT")];
-    // 名稱相同但不是同一個商品（例如代幣化股票）時價差會很大，這種就不用
-    if (p && s.live && Math.abs(p / s.live - 1) < 0.05) { s.live = p; s.liveSource = "binance"; }
+    // 和掃描時的價格差太多就不用（保險，避免代號對錯）
+    if (p && s.live && Math.abs(p / s.live - 1) < 0.2) { s.live = p; s.liveSource = "binance"; }
   }
 }
 
@@ -194,6 +164,9 @@ async function refresh() {
     } catch { /* 舊網站還沒有 version.json */ }
   }
   if (STATIC) { await loadLivePrices(); applyLivePrices(); }
+  if (!btSummary["4H+2H"]) {
+    try { btSummary = await api(`perf/summary.json?v=${APP_VERSION || ""}`); } catch { /* 本機模式沒有這個檔 */ }
+  }
   handleNotifications();
   renderList();
   if (current) {
@@ -204,85 +177,36 @@ async function refresh() {
 
 // ---------- 列表 ----------
 const fmtR = (x) => (x == null ? "—" : `${x >= 0 ? "+" : ""}${x.toFixed(3)}R`);
-/** 實盤紀錄：網站上出現過的每個訊號照規則跟單的結果。
- * 2026-10-12 RSI 收緊成 54～70 / 30～46 之前，紀錄裡有幾筆舊規則才會進的單（標記為 excluded），不算進來。 */
-function liveHtml(name, iv, bt) {
-  const ledger = state.ledger || {};
-  const g = (ledger.groups || {})[`${name}|${market}|${iv}`];
-  if (!g || !g.all) return "";
-  const ex = g.excluded || { trades: 0, wins: 0, sum_r: 0, open: 0 };
-  const n = g.all.trades - ex.trades, open = g.all.open - ex.open;
-  const r = n ? (g.all.sum_r - ex.sum_r) / n : null;
-  const win = n ? (g.all.wins - ex.wins) / n : null;
-  return `<div class="groups"><h3>實盤紀錄${ledger.since ? `（${fmtTime(ledger.since, false).slice(0, 10)} 起）` : ""}</h3>
-    <div class="muted">網站上出現過的每個訊號照規則跟單的結果：已結束 ${n} 筆${n ? `，勝率 ${(win * 100).toFixed(0)}%，平均 ${fmtR(r)}` : ""}；持倉中 ${open} 筆。
-    回測每筆約 ${fmtR(bt)}，要累積幾百筆才看得出差別。</div></div>`;
-}
-
-/** 「全部週期」時每個週期只列一行摘要，讓下面的持倉清單不會被擠到很下面；點 4H / 2H 看完整數字。 */
-function compactStats() {
-  const rows = [];
-  for (const [name, st] of Object.entries(state.strategies)) {
-    if (!inGroup(name)) continue;
-    if (st.markets && !st.markets.includes(market)) continue;
-    for (const iv of state.intervals.map(ivOf)) {
-      if (st.intervals && !st.intervals.map(ivOf).includes(iv)) continue;
-      const s = statsFor(name, market, iv);
-      const a = (s && s.all) || {};
-      const g = ((state.ledger || {}).groups || {})[`${name}|${market}|${iv}`];
-      const ex = (g && g.excluded) || { trades: 0, sum_r: 0, open: 0 };
-      const n = g && g.all ? g.all.trades - ex.trades : 0;
-      const live = g && g.all ? `實盤 ${n} 筆${n ? ` ${fmtR((g.all.sum_r - ex.sum_r) / n)}` : ""}，持倉中 ${g.all.open - ex.open}` : "";
-      const bt = a.trades ? `回測 ${fmtR(a.expectancy_r)}，勝率 ${(a.win_rate * 100).toFixed(1)}%，${a.trades} 筆`
-        : `還沒有在${MARKET_LABEL[market]}回測過`;
-      rows.push(`<div><b>${esc(st.title)} · ${lbl(iv)}</b><div class="muted">${bt}${live ? "；" + live : ""}</div></div>`);
+/** 網站訊號紀錄：網站上出現過的每個訊號照規則跟單的結果（ledger）。
+ * 2026-10-12 RSI 收緊之前有幾筆舊規則才會進的單（excluded），不算進來。 */
+function ledgerFor(iv) {
+  const groups = (state.ledger || {}).groups || {};
+  const t = { trades: 0, wins: 0, sum_r: 0, open: 0 };
+  for (const name of Object.keys(state.strategies).filter((n) => isLive(n))) {
+    for (const x of usedIvs().filter((x) => iv === "ALL" || x === iv)) {
+      const g = groups[`${name}|crypto|${x}`];
+      if (!g || !g.all) continue;
+      const ex = g.excluded || { trades: 0, wins: 0, sum_r: 0, open: 0 };
+      for (const k of Object.keys(t)) t[k] += (g.all[k] || 0) - (ex[k] || 0);
     }
   }
-  return `${rows.join("")}<div class="muted">點上方 ${usedIvs().map(lbl).join(" / ")} 看完整回測和風險說明。</div>`;
+  return t;
 }
 
+/** 列表上方一塊小摘要：實盤規則回測 + 網站訊號紀錄，詳細的在「績效」分頁。 */
 function renderStats() {
-  if (ivFilter === "ALL" && usedIvs().length > 1) { $("stats").innerHTML = compactStats(); return; }
-  const parts = [];
-  for (const [name, st] of Object.entries(state.strategies)) {
-    if (!inGroup(name)) continue;
-    if (st.markets && !st.markets.includes(market)) continue;
-    for (const iv of state.intervals.map(ivOf).filter((x) => ivFilter === "ALL" || x === ivFilter)) {
-      if (st.intervals && !st.intervals.map(ivOf).includes(iv)) continue;
-      const s = statsFor(name, market, iv);
-      if (!s) {
-        parts.push(`<h3>${esc(st.title)} · ${lbl(iv)} · ${MARKET_LABEL[market]}</h3>
-          <p class="warn">這個策略還沒有在${MARKET_LABEL[market]}上回測過，勝率和期望值未知。下面的訊號只能參考，不建議照著下單。</p>`);
-        continue;
-      }
-      const a = s.all || {};
-      if (!a.trades) continue;
-      const h1 = s.first_half || {}, h2 = s.second_half || {};
-      const ok = a.expectancy_r > 0;
-      const src = s.source || "pionex";
-      const px = src === "binance" ? statsFor(name, market, iv, "pionex") : null;
-      const pa = (px && px.all) || {};
-      parts.push(`<h3>${esc(st.title)} · ${lbl(iv)} · ${MARKET_LABEL[market]} 回測（${SOURCE_LABEL[src]}）</h3>
-        <div class="muted">${period(s)}，${s.symbols} 個標的，含手續費 ${(s.fee * 100).toFixed(2)}%/次${src === "binance" ? "。訊號和下單都在派網，回測用幣安較長的歷史" : ""}</div>
-        <div class="grid">
-          <div><span class="muted">勝率</span><b>${(a.win_rate * 100).toFixed(1)}%</b></div>
-          <div><span class="muted">期望值 / 筆</span><b class="${ok ? "up" : "down"}">${a.expectancy_r >= 0 ? "+" : ""}${a.expectancy_r.toFixed(3)}R</b></div>
-          <div><span class="muted">交易筆數</span><b>${a.trades}</b></div>
-          <div><span class="muted">獲利因子</span><b>${a.profit_factor.toFixed(2)}</b></div>
-          <div><span class="muted">每筆賠 ${a.risk_per_trade_pct}% 總報酬（複利）</span><b class="${a.total_return_pct >= 0 ? "up" : "down"}">${pct(a.total_return_pct)}</b></div>
-          <div><span class="muted">最大回撤</span><b class="down">${a.max_drawdown_pct.toFixed(1)}%</b></div>
-        </div>
-        <div class="muted">前半段 ${h1.trades || 0} 筆 期望值 ${h1.trades ? h1.expectancy_r.toFixed(3) + "R" : "—"}；後半段 ${h2.trades || 0} 筆 期望值 ${h2.trades ? h2.expectancy_r.toFixed(3) + "R" : "—"}</div>
-        ${pa.trades ? `<div class="muted">派網資料（${period(px)}，${px.symbols} 個標的）：${pa.trades} 筆，勝率 ${(pa.win_rate * 100).toFixed(1)}%，期望值 ${pa.expectancy_r >= 0 ? "+" : ""}${pa.expectancy_r.toFixed(3)}R，最大回撤 ${pa.max_drawdown_pct.toFixed(1)}%</div>` : ""}
-        ${a.expectancy_r <= 0 ? `<p class="warn">期望值是負的：照這個策略在${MARKET_LABEL[market]}上交易，長期是虧錢的。</p>`
-          : a.expectancy_r < 0.1 ? `<p class="warn">期望值接近 0，優勢很小、可能只是運氣。先用小資金或只觀察。</p>` : ""}
-        <p class="warn">上面的總報酬和回撤，是每個訊號都照單跟、每筆止損最多賠「當下」總資金 ${a.risk_per_trade_pct}% 算出來的，賺了下一筆就下得大一點，所以是複利，不等於 筆數 × 期望值 × ${a.risk_per_trade_pct}%（每筆固定賠起始資金 ${a.risk_per_trade_pct}%、不複利的話是 ${pct(a.trades * a.expectancy_r * a.risk_per_trade_pct)}）${a.max_concurrent ? `；回測期間最多同時有 ${a.max_concurrent} 筆單在持倉，很多標的會一起出訊號、一起虧，所以回撤已經包含這些一起虧的單` : ""}。每筆賠得越多，回撤就成倍放大，建議每筆止損不超過總資金的 ${a.risk_per_trade_pct}%。</p>
-        ${tagOf(name, market) ? `<p class="warn">${esc(tagOf(name, market))}：只記錄實盤結果、不推播，不建議照單下。把同一天、同方向的單算成一次賭注時，2024 年後的優勢接近 0，還不能當成已驗證的策略。</p>` : ""}
-        ${liveHtml(name, iv, tagOf(name, market) ? a.expectancy_r : 0.07)}`);
-    }
-  }
-  $("stats").innerHTML = parts.join("") ||
-    `<span class="muted">還沒有回測數字。執行 <code>python signal_backtest.py</code> 後這裡會顯示勝率與期望值。</span>`;
+  const bt = btFor(ivFilter);
+  const lg = ledgerFor(ivFilter);
+  const name = ivFilter === "ALL" ? "4H + 2H" : lbl(ivFilter);
+  const since = (state.ledger || {}).since;
+  $("stats").innerHTML = `<div class="sum-row">
+      <div><span class="muted">實盤規則回測 · ${name}</span>${bt ? `<b>${bt.trades.toLocaleString()} 筆 · 勝率 ${(bt.win_rate * 100).toFixed(0)}% · 每筆 ${fmtR(bt.avg_r)}</b>
+        <span class="muted">${bt.start.slice(0, 7)} ~ ${bt.end.slice(0, 7)}，最大回撤 ${bt.max_dd_pct.toFixed(0)}%（每筆風險 0.25%）</span>` : "<b>—</b>"}</div>
+      <div><span class="muted">網站訊號紀錄${since ? `（${fmtTime(since, false).slice(0, 10)} 起）` : ""}</span>
+        <b>${lg.trades} 筆${lg.trades ? ` · 勝率 ${(lg.wins / lg.trades * 100).toFixed(0)}% · 每筆 ${fmtR(lg.sum_r / lg.trades)}` : ""}</b>
+        <span class="muted">持倉中 ${lg.open} 筆</span></div>
+    </div>
+    <a class="sum-link" href="#perf">幣安自動交易和完整回測 →</a>`;
 }
 
 function ladderHtml(s, price) {
@@ -316,11 +240,6 @@ function statusText(s) {
   return { cls: "closed", text: `已結束 · ${KIND_TEXT[last.kind] || last.kind}` };
 }
 
-function tagChip(s) {
-  const tag = tagOf(s.strategy, mk(s));
-  return tag ? `<span class="chip tag-chip">${esc(tag)}</span>` : "";
-}
-
 function cardHtml(s) {
   const price = s.live;
   const pnl = positionPnl(s, price);
@@ -329,8 +248,8 @@ function cardHtml(s) {
   const title = (state.strategies[s.strategy] || {}).title || s.strategy;
   return `<div class="panel card" data-id="${esc(s.id)}">
     <div class="row1"><span class="side ${s.side}">${s.side === "LONG" ? "做多" : "做空"}</span>
-      <span class="pair">${nameHtml(s)}</span>
-      <span class="chip">${s.label}</span>${tagChip(s)}${tested(s) ? "" : `<span class="chip warn-chip">未回測</span>`}
+      <span class="pair">${coinHtml(s)}</span>
+      <span class="chip">${s.label}</span>
       <span class="status ${st.cls}">${st.text}</span></div>
     <div class="meta">${esc(title)} · ${ago(s.time)} · 訊號價 ${fp(s.price)}</div>
     <div class="pnl"><div class="big num ${pnl >= 0 ? "up" : "down"}">${pct(pnl)}<small>${s.track.status === "OPEN" ? "未實現盈虧" : "已實現盈虧"}（1x）</small></div>
@@ -348,22 +267,10 @@ function hiddenNote(inMarket) {
 }
 
 function renderList() {
-  const hasObserve = Object.keys(state.strategies).some((n) => ["crypto", "stock", "commodity"].some((m) => isObserve(n, m)));
-  if (!hasObserve) group = "strategy";
   const ivs = usedIvs();
   if (ivFilter !== "ALL" && !ivs.includes(ivFilter)) ivFilter = "ALL";
-  const openIn = (g, m) => state.signals.filter((s) => isObserve(s.strategy, m) === (g === "observe") && mk(s) === m
-    && s.track.status === "OPEN").length;
-  groupTabsEl().classList.toggle("hidden", !hasObserve);
-  groupTabsEl().innerHTML = [["strategy", "策略"], ["observe", "觀察組"]].map(([g, name]) =>
-    `<button class="ivtab grouptab ${g === group ? "active" : ""}" data-group="${g}">${name} <span>${openIn(g, market) || ""}</span></button>`).join("");
   renderStats();
-  document.querySelectorAll(".mtab").forEach((b) => {
-    const m = b.dataset.market;
-    b.classList.toggle("active", m === market);
-    b.querySelector("span").textContent = openIn(group, m) || "";
-  });
-  const inMarket = state.signals.filter((s) => mk(s) === market && inGroup(s.strategy));
+  const inMarket = state.signals.filter((s) => isLive(s.strategy, mk(s)));
   ivTabsEl().classList.toggle("hidden", ivs.length < 2);
   ivTabsEl().innerHTML = ["ALL", ...ivs].map((iv) => {
     const n = inMarket.filter((s) => (iv === "ALL" || s.interval === iv) && s.track.status === "OPEN").length;
@@ -378,10 +285,10 @@ function renderList() {
   $("cards").innerHTML = shown.map(cardHtml).join("") ||
     `<div class="empty">${ivFilter === "ALL" ? "" : lbl(ivFilter) + " "}${tab === "OPEN" ? "目前沒有進行中的訊號" : "最近沒有已結束的訊號"}${
       tab === "OPEN" && closed.length ? `<br><small>最近 ${state.keep_days || 7} 天有 ${closed.length} 筆已經結束，點「已結束」查看</small>` : ""}${hiddenNote(inMarket)}</div>`;
-  const counts = state.markets ? Object.entries(state.markets).map(([m, v]) => `${v.label} ${v.symbols}`).join("、") : `${state.symbols} 個`;
-  $("foot").textContent = `監看 ${counts} · 週期 ${state.intervals.join("/")} · ` +
+  const n = state.markets && state.markets.crypto ? state.markets.crypto.symbols : state.symbols;
+  $("foot").textContent = `監看幣安 USDT 永續合約 ${n} 個（市值前 100 名）· 週期 ${state.intervals.join("/")} · ` +
     `最後掃描 ${state.updated ? fmtTime(state.updated) : "—"}` +
-    (STATIC ? ` · 訊號每 15 分鐘由 GitHub 排程更新（K 線收盤後約 1 分鐘推播新訊號） · ${market === "crypto" && livePricesAt ? "現價來自 Binance 合約即時價" : "現價為掃描時的派網價格"}`
+    (STATIC ? ` · 每 15 分鐘更新（K 線收盤後約 1 分鐘推播新訊號）${livePricesAt ? " · 現價為幣安合約即時價" : ""}`
       : " · 每 30 秒更新頁面");
 }
 
@@ -390,10 +297,9 @@ function renderDetailHead() {
   const s = current;
   const price = s.live;
   const i = s.info || {};
-  const st = statsFor(s.strategy, mk(s), s.interval);
-  const a = st && st.all;
+  const a = btFor(s.interval);
   $("detail-head").innerHTML = `<div class="dh">
-    <div class="row1"><span class="pair">${mk(s) === "crypto" ? pair(s.symbol) : nameHtml(s, true)}</span><span class="chip">${s.label}</span>${tagChip(s)}
+    <div class="row1"><span class="pair">${pair(s.symbol)}</span><span class="chip">${s.label}</span>
       <span class="dir ${s.side === "LONG" ? "up" : "down"}">${s.side}</span></div>
     <div class="muted">訊號時間 ${fmtTime(s.time)}（${s.label} K 線收盤確認）· UTC+8</div>
     <div class="prices"><div><span class="muted">訊號價格</span><b class="num">${fp(s.price)}</b></div>
@@ -408,11 +314,9 @@ function renderDetailHead() {
       <span>ATR</span><span>${fp(i.atr, s.price)}</span>
       ${i.adx != null ? `<span>ADX(14)</span><span>${i.adx}</span>` : ""}
       <span>EMA144 / 169</span><span>${fp(i.ema144)} / ${fp(i.ema169)}</span>`}
-      ${a ? `<span>回測勝率</span><span>${(a.win_rate * 100).toFixed(1)}%（${a.trades} 筆）</span>
-      <span>回測期望值</span><span>${a.expectancy_r.toFixed(3)}R / 筆</span>`
-        : `<span>回測</span><span>這類標的尚未回測，結果未知</span>`}
+      ${a ? `<span>實盤規則回測</span><span>${s.label}：勝率 ${(a.win_rate * 100).toFixed(1)}%、每筆 ${fmtR(a.avg_r)}（${a.trades} 筆）</span>` : ""}
       <span>出場規則</span><span>${esc(exitRuleText(s))}</span>
-      ${s.track.trailing && s.track.status === "OPEN" ? `<span>目前追蹤止損</span><span>${fp(s.track.stop, s.price)}（派網的止損單要跟著改到這裡）</span>` : ""}
+      ${s.track.trailing && s.track.status === "OPEN" ? `<span>目前追蹤止損</span><span>${fp(s.track.stop, s.price)}</span>` : ""}
     </div></details>
     <div class="muted">現價更新 ${fmtTime(Date.now())} · 資訊每 30 秒更新</div></div>`;
 }
@@ -424,72 +328,6 @@ function renderLevels() {
       <small>${s.track.status === "OPEN" ? "未實現" : "已實現"}（1x 含費）</small></div>
       <div class="right">${statusText(s).text}</div></div>
     ${ladderHtml(s, s.live)}${timelineHtml(s)}`;
-}
-
-// ---------- 下單計算：資金 × 每筆風險 % → 每一份要下多少（照派網最小下單量進位） ----------
-function sizing() {
-  const num = (k, d) => { try { const v = Number(localStorage.getItem(k)); return v > 0 ? v : d; } catch { return d; } };
-  return { capital: num("capital", 100), riskPct: num("riskPct", 0.25) };
-}
-
-/** 每一份的數量。數量照派網的級距取整，低於最小數量 / 最小名目金額時用最小值（風險會變大）。 */
-function sizePlan(s, capital, riskPct, spec) {
-  const riskU = capital * riskPct / 100;
-  const dist = Math.abs(s.price - s.sl);
-  const total = riskU / dist;
-  const e = s.exit || {};
-  const parts = (e.portions || [1 / 3, 1 / 3, 1 / 3]).slice(0, s.tps.length);
-  const rest = 1 - parts.reduce((a, b) => a + b, 0);
-  const slices = parts.map((p, k) => ({ name: `TP${k + 1}`, price: s.tps[k], p }));
-  if (rest > 1e-6) slices.push({ name: "追蹤", price: null, p: rest });
-  const step = spec && spec.step > 0 ? spec.step : 0;
-  const minQ = spec ? Math.max(spec.min_size || 0, (spec.min_notional || 0) / s.price) : 0;
-  const roundStep = (q) => step ? Math.round(q / step) * step : q;
-  const ceilStep = (q) => step ? Math.ceil(q / step - 1e-9) * step : q;
-  const minQty = ceilStep(minQ);
-  for (const x of slices) {
-    const raw = total * x.p;
-    x.qty = roundStep(raw);
-    x.bumped = x.qty < minQty;
-    if (x.bumped) x.qty = minQty;
-  }
-  const qty = slices.reduce((a, x) => a + x.qty, 0);
-  const digits = step ? Math.max(0, -Math.floor(Math.log10(step) + 1e-9)) : 6;
-  return { riskU, total, slices, qty, digits, notional: qty * s.price, actualRisk: qty * dist, spec };
-}
-
-function renderSize() {
-  const s = current;
-  if (!s) return;
-  const { capital, riskPct } = sizing();
-  const spec = (state.specs || {})[s.symbol];
-  const plan = sizePlan(s, capital, riskPct, spec);
-  const coin = mk(s) === "crypto" ? pair(s.symbol).split("/")[0] : s.symbol.replace("_USDT_PERP", "");
-  const q = (x) => x.toFixed(plan.digits);
-  const over = plan.actualRisk > plan.riskU * 1.2;
-  $("detail-size").innerHTML = `<h3 class="size-h">下單計算</h3>
-    <div class="size-in">
-      <label>資金 <input id="sz-cap" type="number" inputmode="decimal" min="1" step="any" value="${capital}"> U</label>
-      <label>每筆風險 <input id="sz-risk" type="number" inputmode="decimal" min="0.01" step="0.05" value="${riskPct}"> %</label>
-    </div>
-    <div class="kv num">
-      <span>止損賠</span><span>${plan.riskU.toFixed(2)} U（進場到 SL ${(Math.abs(s.price - s.sl) / s.price * 100).toFixed(2)}%）</span>
-      <span>總數量</span><span>${q(plan.qty)} ${esc(coin)}（約 ${plan.notional.toFixed(2)} U，資金的 ${(plan.notional / capital).toFixed(1)} 倍）</span>
-      ${plan.slices.map((x) => `<span>${x.name}${x.price != null ? ` @ ${fp(x.price, s.price)}` : ""}</span>
-        <span>${q(x.qty)} ${esc(coin)}${x.bumped ? ` <i class="warn">已調到最小下單量</i>` : ""}</span>`).join("")}
-      <span>實際止損賠</span><span class="${over ? "down" : ""}">${plan.actualRisk.toFixed(2)} U（資金的 ${(plan.actualRisk / capital * 100).toFixed(2)}%）</span>
-    </div>
-    <p class="muted">${spec ? `派網最小下單量 ${spec.min_size} ${esc(coin)}、最少 ${spec.min_notional} U；數量照 ${spec.step} 的級距取整。` : "這個標的沒有派網的下單限制資料，沒檢查最小下單量。"}
-      ${over ? "最小下單量讓實際風險比設定多，照專案規則還是下最小量（不要跳過這單）。" : ""}
-      價格用訊號價算；實際進場價不同時，數量照比例差一點沒關係，止損價照上面的 SL 掛。</p>`;
-  const save = (k, id) => () => {
-    const v = Number($(id).value);
-    if (!(v > 0)) return;
-    try { localStorage.setItem(k, String(v)); } catch { /* 私密模式 */ }
-    renderSize();
-  };
-  $("sz-cap").addEventListener("change", save("capital", "sz-cap"));
-  $("sz-risk").addEventListener("change", save("riskPct", "sz-risk"));
 }
 
 function openDetail(id) {
@@ -506,7 +344,6 @@ function openDetail(id) {
   sel.innerHTML = ivs.map((iv, k) => `<option value="${iv}">${lbl(iv)}${k === 0 ? " · 原訊號" : ""}</option>`).join("");
   renderDetailHead();
   renderLevels();
-  renderSize();
   loadChart(s.interval, true);
   window.scrollTo(0, 0);
 }
@@ -519,7 +356,7 @@ function closeDetail() {
   $("list-view").classList.remove("hidden");
   $("back").classList.add("hidden");
   $("subtitle").textContent = "訊號列表";
-  if (location.hash) history.replaceState(null, "", location.pathname);
+  if (location.hash.startsWith("#s=")) history.replaceState(null, "", location.pathname);
 }
 
 // ---------- 圖表 ----------
@@ -725,16 +562,9 @@ function setLive(on) {
 function lastSeen() { try { return Number(localStorage.getItem("lastSeenNote") || 0); } catch { return 0; } }
 function setLastSeen(v) { try { localStorage.setItem("lastSeenNote", String(v)); } catch { /* 私密模式 */ } }
 
-const isObserveNote = (n) => {
-  if (n.observe) return true;
-  // 舊通知沒有 observe 欄位（或寫 false，但策略後來改成觀察組）：用現在的策略設定判斷。
-  // 訊號已經不在網站上時，用通知文字判斷市場：加密貨幣寫「XXX/USDT」，美股、商品寫名稱
-  const s = state.signals.find((x) => x.id === n.signal_id);
-  const m = s ? mk(s) : String(n.text).includes("/USDT") ? "crypto" : "stock";
-  return isObserve(String(n.signal_id).split("|")[2], m);
-};
-// 鈴鐺只放實盤策略的通知；觀察組（SMC、訂單流、美股/商品的維加斯…）在各自的訊號卡上看
-const liveNotes = () => state.notifications.filter((n) => !isObserveNote(n));
+// 鈴鐺只放實盤策略在加密貨幣上的通知；舊資料裡的觀察組、美股/商品通知不顯示
+const liveNotes = () => state.notifications.filter((n) =>
+  !n.observe && String(n.text).includes("/USDT") && isLive(String(n.signal_id).split("|")[2]));
 
 function handleNotifications() {
   const notes = liveNotes();
@@ -776,23 +606,11 @@ $("cards").addEventListener("click", (e) => {
   const c = e.target.closest(".card");
   if (c) { location.hash = "s=" + encodeURIComponent(c.dataset.id); }
 });
-document.querySelectorAll(".mtab").forEach((b) => b.addEventListener("click", () => {
-  market = b.dataset.market;
-  try { localStorage.setItem("market", market); } catch { /* 私密模式 */ }
-  renderList();
-}));
 document.querySelectorAll(".tab").forEach((b) => b.addEventListener("click", () => {
   tab = b.dataset.tab;
   document.querySelectorAll(".tab").forEach((x) => x.classList.toggle("active", x === b));
   renderList();
 }));
-groupTabsEl().addEventListener("click", (e) => {
-  const b = e.target.closest(".grouptab");
-  if (!b) return;
-  group = b.dataset.group;
-  try { localStorage.setItem("group", group); } catch { /* 私密模式 */ }
-  renderList();
-});
 ivTabsEl().addEventListener("click", (e) => {
   const b = e.target.closest(".ivtab");
   if (!b) return;

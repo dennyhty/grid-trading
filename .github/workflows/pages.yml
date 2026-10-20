@@ -1,5 +1,5 @@
 # 每 15 分鐘掃描一次訊號，把網頁和資料直接發佈到 GitHub Pages。
-# 只用公開行情（派網 K 線；訂單流觀察組另外讀幣安的公開持倉量），不需要任何金鑰。
+# 只用幣安 USDT 永續合約的公開 K 線（www.binance.com/fapi；fapi.binance.com 從 GitHub 連會被擋），不需要任何金鑰。
 # 需要的設定：Settings → Pages → Source 選「GitHub Actions」。
 name: 訊號網頁
 
@@ -14,7 +14,7 @@ on:
         default: false
   push:
     branches: [main, claude/project-thread-t012rc]
-    paths: ["web/**", "grid_trading/**", "signal_*.py", "stats/**", ".github/workflows/pages.yml"]
+    paths: ["web/**", "reports/**", "grid_trading/**", "signal_*.py", "stats/**", ".github/workflows/pages.yml"]
 
 permissions:
   contents: read
@@ -63,6 +63,23 @@ jobs:
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      # 幣安自動交易（VPS 上的 deploy/trader_feed.py）的紀錄，給網站的「績效」頁。
+      # 沒設 TRADER_FEED_URL 或 VPS 連不上，就沿用目前網站上的那一份，不影響訊號部署。
+      - name: 取得幣安自動交易紀錄
+        env:
+          FEED: ${{ secrets.TRADER_FEED_URL }}
+        run: |
+          owner="${GITHUB_REPOSITORY%/*}"; repo="${GITHUB_REPOSITORY#*/}"
+          ok() { python3 -c "import json,sys; d=json.load(open(sys.argv[1])); assert isinstance(d.get('books'), dict)" "$1" 2>/dev/null; }
+          if [ -n "$FEED" ] && curl -sS --max-time 20 --retry 2 -o trader_new.json "$FEED" && ok trader_new.json; then
+            echo "已從 VPS 更新"
+          elif curl -sS --retry 3 -H 'Cache-Control: no-cache' -o trader_new.json \
+              "https://${owner}.github.io/${repo}/data/trader.json?t=$(date +%s)" && ok trader_new.json; then
+            echo "VPS 沒回應或沒設定，沿用網站上的上一份"
+          else
+            echo '{"books":{}}' > trader_new.json; echo "還沒有自動交易紀錄"
+          fi
+          mv trader_new.json site/data/trader.json
       - name: 整理要推到 Telegram 的新通知
         run: python signal_telegram.py outbox site/data previous_notifications.json outbox.json early_sent.json
       - uses: actions/upload-pages-artifact@v3

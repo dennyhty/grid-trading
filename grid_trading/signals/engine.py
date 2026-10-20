@@ -1,4 +1,4 @@
-"""即時掃描：定時抓最新 K 線跑策略，追蹤每個訊號的 TP / 止損，並把新事件寫進通知中心。"""
+"""即時掃描：定時抓最新幣安合約 K 線跑策略，追蹤每個訊號的 TP / 止損，並把新事件寫進通知中心。"""
 
 from __future__ import annotations
 
@@ -14,30 +14,38 @@ import pandas as pd
 from .. import indicators as ind
 from ..history import resample
 from ..markets import LABELS as MARKET_LABELS, classify, display_name
-from ..pionex import PionexPublic
+from ..binance_public import BinancePublic, rows_to_frame
 from .strategy import Signal, Strategy
 from .tracker import track
 
 INTERVAL_MS = {"15M": 900_000, "30M": 1_800_000, "60M": 3_600_000, "2H": 7_200_000, "4H": 14_400_000,
                "8H": 28_800_000, "12H": 43_200_000, "1D": 86_400_000}
 LABEL = {"60M": "1H"}
-# 派網沒有的週期，用較小的週期合成：週期 → (來源週期, 幾根合一根)。分組從 00:00 UTC 起算，和幣安的 2h K 線一致。
-SYNTHETIC = {"2H": ("60M", 2)}
-# 掃描時每個週期抓幾根。派網對同一個 IP 有請求量限制（超過回 429），2H 由 1H 合成、每根要 2 根 1H，
-# 所以只抓 500 根（1000 根 1H，2 次請求）；EMA169 用 500 根暖身已經夠準
-SCAN_BARS = {"2H": 500}
+# 幣安沒有的週期，用較小的週期合成：週期 → (來源週期, 幾根合一根)。幣安 2H、4H 都有原生 K 線，目前不用合成
+SYNTHETIC: dict[str, tuple[str, int]] = {}
+# 掃描時每個週期抓幾根（沒列的用 1000）。EMA169 用 1000 根暖身已經夠準，一個（幣, 週期）只要一次請求
+SCAN_BARS: dict[str, int] = {}
 
 
 def label(interval: str) -> str:
     return LABEL.get(interval, interval)
 
 
-def _get_retry(api: PionexPublic, path: str, params: dict, tries: int = 4) -> tuple[dict | None, str]:
-    """派網偶爾回錯（例如請求太密被限流），等一下再試；試完還是失敗就回傳 (None, 錯誤訊息)。"""
+def synthesize(raw: pd.DataFrame, interval: str) -> pd.DataFrame:
+    """由來源週期的 K 線合成 SYNTHETIC 裡的週期，沿用來源的「沒抓完整」標記。"""
+    df = resample(raw, f"{INTERVAL_MS[interval] // 3_600_000}h", origin="epoch") if len(raw) else raw
+    df.attrs["incomplete"] = raw.attrs.get("incomplete", False)
+    df.attrs["error"] = raw.attrs.get("error", "")
+    return df
+
+
+def _rows_retry(api: BinancePublic, symbol: str, interval: str, limit: int, end: int | None,
+                tries: int = 4) -> tuple[list | None, str]:
+    """幣安偶爾逾時或限流（429），等一下再試；試完還是失敗就回傳 (None, 錯誤訊息)。"""
     err = ""
     for i in range(tries):
         try:
-            return api._get(path, params), ""
+            return api.kline_rows(symbol, interval, limit, end), ""
         except Exception as e:
             err = f"{type(e).__name__}: {str(e)[:120]}"
             if i < tries - 1:
@@ -45,16 +53,8 @@ def _get_retry(api: PionexPublic, path: str, params: dict, tries: int = 4) -> tu
     return None, err
 
 
-def synthesize(raw: pd.DataFrame, interval: str) -> pd.DataFrame:
-    """由來源週期的 K 線合成 SYNTHETIC 裡的週期（例如 1H → 2H），沿用來源的「沒抓完整」標記。"""
-    df = resample(raw, f"{INTERVAL_MS[interval] // 3_600_000}h", origin="epoch") if len(raw) else raw
-    df.attrs["incomplete"] = raw.attrs.get("incomplete", False)
-    df.attrs["error"] = raw.attrs.get("error", "")
-    return df
-
-
-def fetch_klines(api: PionexPublic, symbol: str, interval: str, bars: int = 1000) -> pd.DataFrame:
-    """抓最近 bars 根 K 線（每次最多 500，往回翻頁）。最後一根可能還沒收盤。
+def fetch_klines(api: BinancePublic, symbol: str, interval: str, bars: int = 1000) -> pd.DataFrame:
+    """抓最近 bars 根幣安合約 K 線（每次最多 1500，往回翻頁）。最後一根可能還沒收盤。
 
     重試後還是抓不到時，回傳已抓到的部分，並在 df.attrs["incomplete"] 標記 True，
     讓呼叫的人分得出「這個幣歷史本來就短」和「這次沒抓到」。
@@ -66,30 +66,24 @@ def fetch_klines(api: PionexPublic, symbol: str, interval: str, bars: int = 1000
     end = None
     incomplete, error = False, ""
     while bars > 0:
-        params = {"symbol": symbol, "interval": interval, "limit": min(500, bars)}
-        if end is not None:
-            params["endTime"] = end
-        data, error = _get_retry(api, "/api/v1/market/klines", params)
-        if data is None:
+        limit = min(1500, bars)
+        rows, error = _rows_retry(api, symbol, interval, limit, end)
+        if rows is None:
             incomplete = True
             break
-        batch = pd.DataFrame(data.get("klines", []))
-        if batch.empty:
+        if not rows:
             break
+        batch = rows_to_frame(rows)
         frames.append(batch)
         bars -= len(batch)
-        if len(batch) < 500:
+        if len(batch) < limit:
             break
-        end = int(batch["time"].min()) - 1
+        end = int(rows[0][0]) - 1
     if not frames:
         df = pd.DataFrame(columns=["time", "open", "high", "low", "close", "volume"])
         df.attrs["incomplete"], df.attrs["error"] = incomplete, error
         return df
-    df = pd.concat(frames).drop_duplicates("time")
-    for col in ("open", "high", "low", "close", "volume"):
-        df[col] = pd.to_numeric(df[col], errors="coerce")
-    df["time"] = pd.to_datetime(df["time"], unit="ms", utc=True)
-    df = df.sort_values("time").reset_index(drop=True)
+    df = pd.concat(frames).drop_duplicates("time").sort_values("time").reset_index(drop=True)
     df.attrs["incomplete"], df.attrs["error"] = incomplete, error
     return df
 
@@ -97,8 +91,8 @@ def fetch_klines(api: PionexPublic, symbol: str, interval: str, bars: int = 1000
 class Engine:
     def __init__(self, strategies: list[Strategy], symbols: list[str], intervals: list[str],
                  keep_days: float = 7, fee: float = 0.0005, state_dir: Path = Path("output"),
-                 stats_path: Path = Path("stats/signal_stats.json"), workers: int = 2):
-        self.api = PionexPublic(pause=0.1)
+                 stats_path: Path = Path("stats/signal_stats.json"), workers: int = 4):
+        self.api = BinancePublic()
         self.workers = workers  # 同時抓幾個 K 線（每條執行緒各用自己的連線）
         self._local = threading.local()
         self.failed: list[tuple[str, str]] = []
@@ -131,16 +125,16 @@ class Engine:
         self._prices: dict[str, float] = {}
         self._prices_at = 0.0
 
-    def client(self) -> PionexPublic:
+    def client(self) -> BinancePublic:
         """這條執行緒自己的 API 連線。"""
         if not hasattr(self._local, "api"):
-            self._local.api = PionexPublic(pause=0.1)
+            self._local.api = BinancePublic()
         return self._local.api
 
     def klines_many(self, jobs: list[tuple[str, str]], bars: int = 1000) -> dict[tuple[str, str], pd.DataFrame]:
         """同時抓多個（symbol, interval）的 K 線；SCAN_BARS 裡有的週期改用那個根數。prefetched 裡完整的直接用。
 
-        合成的週期（2H）改抓來源週期（1H）再合成；同一個幣也要掃 1H 時共用同一份 1H，不多打派網。
+        合成的週期改抓來源週期再合成（目前沒有合成的週期）。
         抓到的來源 K 線也放進回傳結果（例如只掃 2H 時多一個 1H），畫圖和下一次掃描可以直接用。"""
         need: dict[tuple[str, str], int] = {}  # 實際要抓的（幣, 週期）→ 根數
         for sym, iv in jobs:
@@ -172,8 +166,7 @@ class Engine:
         """所有永續合約最新價，快取 10 秒。"""
         if time.time() - self._prices_at > 10:
             try:
-                t = self.api.perp_tickers()
-                self._prices = dict(zip(t["symbol"], t["close"].astype(float)))
+                self._prices = self.api.prices()
                 self._prices_at = time.time()
             except Exception:
                 pass
