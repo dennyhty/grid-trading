@@ -2,6 +2,7 @@
 
 python -m research.exit_unify --source binance     （幣安 2020 起，主）
 python -m research.exit_unify --source pionex      （派網 2023 起，輔）
+python -m research.exit_unify --source binance_ext （合約上市前接幣安現貨，2017-08 起）
 
 需要 numba（和 stop_research.py 共用模擬程式）。
 
@@ -106,7 +107,7 @@ def account(tr: pd.DataFrame, start, end, risk=0.0025) -> dict:
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--source", default="binance", choices=["binance", "pionex"])
+    ap.add_argument("--source", default="binance", choices=["binance", "binance_ext", "pionex"])
     ap.add_argument("--fee", type=float, default=0.0005)
     ap.add_argument("--workers", type=int, default=3)
     ap.add_argument("--out", default="output")
@@ -125,7 +126,7 @@ def main():
     out.mkdir(exist_ok=True)
     allt.to_csv(out / f"exit_unify_trades_{args.source}.csv.gz", index=False)
     t0, t1 = allt["time"].min(), allt["time"].max() + pd.Timedelta(days=1)
-    pers = {"全期": (t0, t1), "2020-23": (t0, SPLIT), "2024+": (SPLIT, t1)} if args.source == "binance" else \
+    pers = {"全期": (t0, t1), "2020-23": (t0, SPLIT), "2024+": (SPLIT, t1)} if args.source != "pionex" else \
         {"全期": (t0, t1), "2023-24": (t0, pd.Timestamp("2025-01-01", tz="UTC")), "2025+": (pd.Timestamp("2025-01-01", tz="UTC"), t1)}
     books = {}
     for iv in ("4H", "2H"):
