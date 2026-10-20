@@ -355,6 +355,11 @@ class LiveBroker:
     def reconcile(self, store: Store, notify) -> None:
         """啟動時比對：交易所有、狀態檔沒有的倉位只提醒，不碰；狀態檔的單止損不見（不是成交）就補掛。"""
         self.begin_step()
+        migrated = [p for p in store.positions.values() if "remaining" not in p]
+        for p in migrated:
+            # 2026-10-20 以前開的單：沒有 remaining / fills，止損是「全部平倉」。補上欄位，止損改成用自己的數量
+            p["remaining"] = max(0.0, p["qty_f"] - sum(p["slices"][:p["tps_hit"]]))
+            p["fills"] = [[p["slices"][n], p["tps"][n]] for n in range(p["tps_hit"])]
         live = self.client.positions()
         expected: dict[tuple, float] = {}
         for p in store.positions.values():
@@ -363,6 +368,9 @@ class LiveBroker:
         for key, amt in live.items():
             if amt > expected.get(key, 0.0) + 1e-9:
                 notify(f"注意：{_pair(key[0])} {key[1]} 有 {amt}，比這個程式記錄的多，多出來的不會管理")
+        for pos in migrated:
+            if self.status(pos, pos.get("stop_id"))[0] == "open" and pos["remaining"] > pos["step"] / 2:
+                self.move_stop(pos, pos["stop"])
         for pos in store.positions.values():
             if self.status(pos, pos.get("stop_id"))[0] == "gone":
                 pos["stop_version"] = pos.get("stop_version", 0) + 1
@@ -417,6 +425,8 @@ class LiveBroker:
         r = self.client.conditional_order(pos["symbol"], pos["close_side"], pos["side"], "STOP_MARKET",
                                           fmt(price, pos["tick"]), quantity=fmt(pos["remaining"], pos["step"]),
                                           client_id=f"{pos['tag']}s{version}")
+        if pos["symbol"] in getattr(self, "_open", {}):
+            self._open[pos["symbol"]].add(r.get("algoId"))  # 這一輪的掛單快取也要有新止損
         return r.get("algoId")
 
     def _close_rest(self, pos: dict, reason: str) -> None:

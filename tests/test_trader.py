@@ -315,3 +315,20 @@ def test_leverage_lowered_for_wide_stops(tmp_path):
     tr.try_open(make_signal(risk=16.0, interval="4H"))       # 止損 16% → 3 倍（強平在約 33% 外）
     assert calls == [5, 3]
     assert tr.store.leverage == {"XUSDT": 3}
+
+
+def test_reconcile_migrates_old_positions(tmp_path):
+    ex = FakeExchange()
+    broker = LiveBroker(ex, ex, Config())
+    tr, sink = make_trader(tmp_path, broker, ex)
+    tr.try_open(make_signal())
+    pos = next(iter(tr.store.positions.values()))
+    # 模擬舊版的單：沒有 remaining / fills，止損是全部平倉（沒有數量）
+    del pos["remaining"], pos["fills"]
+    ex.algo[pos["stop_id"]]["qty"] = None
+    pos["tps_hit"] = 1
+    broker.reconcile(tr.store, tr.notify)
+    assert pos["remaining"] == pytest.approx(0.625 - 0.156)
+    assert pos["fills"] == [[pytest.approx(0.156), pytest.approx(104.0)]]
+    stops = [o for o in ex.algo.values() if o["type"] == "STOP_MARKET"]
+    assert len(stops) == 1 and stops[0]["qty"] == pytest.approx(0.625 - 0.156)
