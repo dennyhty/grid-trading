@@ -119,11 +119,12 @@
 
   function renderTrader(el) {
     const books = trader.books || {};
-    const modes = ["live", "testnet", "paper"].filter((m) => books[m]);
+    // 紙上交易（paper）的紀錄 VPS 上照樣保留（之後判斷策略用），網站不顯示（Denny 2026-10-20）
+    const modes = ["live", "testnet"].filter((m) => books[m]);
     if (!modes.length) {
       el.innerHTML = `<div class="panel">
         <h3>還沒有自動交易紀錄</h3>
-        <p class="muted">VPS 上的自動交易程式（binance-trader@testnet / @paper）把紀錄存在 VPS 上，網站要經由
+        <p class="muted">VPS 上的自動交易程式（binance-trader@testnet）把紀錄存在 VPS 上，網站要經由
         <code>deploy/trader_feed.py</code> 才拿得到。照 <code>docs/website.md</code> 在 VPS 開好 feed、把網址存成
         GitHub secret <code>TRADER_FEED_URL</code> 後，下一次網站更新（每 15 分鐘）這裡就會出現實際成交、持倉和資金曲線。</p>
       </div>`;
@@ -144,7 +145,7 @@
         <div class="row-between"><h3>幣安${MODE_LABEL[mode]}</h3>
           <span class="chip ${stale ? "warn-chip" : ""}">${stale ? "紀錄超過 3 小時沒更新" : "運作中"}${b.paused ? "・已暫停開新倉" : ""}</span></div>
         <p class="muted">紀錄更新 ${b.updated ? tw(b.updated) : "—"}・最後掃描的 K 線收盤 ${lastScan ? tw(lastScan) : "—"}（台北時間）
-        ${mode === "paper" ? "・紙上交易用訊號收盤價成交、照回測規則出場，不是真的下單" : mode === "testnet" ? "・測試網是假資金，成交價和流動性跟正式站不完全一樣" : ""}</p>
+        ${mode === "testnet" ? "・測試網是假資金，成交價和流動性跟正式站不完全一樣" : ""}</p>
         ${tiles([
           ["已平倉", `${st.n} 筆`],
           ["勝率", pctOf(st.win), "", ref ? `回測 ${pctOf(ref.win_rate, 0)}` : ""],
