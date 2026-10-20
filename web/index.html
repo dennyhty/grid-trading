@@ -4,18 +4,24 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#0f1115">
-<title>交易訊號</title>
+<title>量化交易</title>
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
 <header class="top">
   <button id="back" class="ghost hidden" aria-label="返回">‹ 返回</button>
   <div class="brand">
-    <div class="name">SIGNAL</div>
+    <div class="name">QUANT</div>
     <div class="sub" id="subtitle">訊號列表</div>
   </div>
   <button id="bell" class="ghost bell" aria-label="通知中心">🔔<span id="badge" class="badge hidden">0</span></button>
 </header>
+
+<nav class="nav" id="nav">
+  <a href="#" data-page="signals" class="active">訊號</a>
+  <a href="#perf" data-page="perf">績效</a>
+  <a href="#research" data-page="research">策略研究</a>
+</nav>
 
 <main>
   <!-- 列表 -->
@@ -72,6 +78,12 @@
     <div class="panel" id="detail-levels"></div>
     <div class="panel" id="detail-size"></div>
   </section>
+
+  <!-- 績效：幣安自動交易 + 維加斯實盤規則回測（perf.js） -->
+  <section id="perf-view" class="page hidden"></section>
+
+  <!-- 策略研究：報告索引與全文（perf.js） -->
+  <section id="research-view" class="page hidden"></section>
 </main>
 
 <!-- 通知中心 -->
@@ -88,5 +100,6 @@
 
 <script src="vendor/lightweight-charts.standalone.production.js"></script>
 <script src="app.js"></script>
+<script src="perf.js"></script>
 </body>
 </html>

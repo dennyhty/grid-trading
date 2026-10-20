@@ -1,0 +1,113 @@
+{
+  "status": {
+    "live": "已上線",
+    "observe": "觀察組",
+    "keep": "維持現狀",
+    "pending": "待決定",
+    "rejected": "不採用",
+    "info": "參考"
+  },
+  "groups": [
+    {
+      "name": "實盤維加斯：績效與風險",
+      "items": [
+        {"date": "2026-10-19", "title": "2026 年 3~5 月大回撤", "file": "signals/report_drawdown_2026_20261019.md", "status": "pending",
+         "summary": "−175R（−35.7%）主要是空單；同時最多 15 張 + 回撤 20R 後風險減半，回撤 −15%、單利 +26%/年（選在看過這段之後，要打折看）。"},
+        {"date": "2026-10-18", "title": "逐年報酬", "file": "signals/report_yearly_returns_20261018.md", "status": "info",
+         "summary": "2017-09 起；舊規則（同幣只做一張）9130 筆、每筆 +0.147R、單利 +37%/年。現在 2H、4H 都做：10722 筆、+0.160R、單利 +47%/年、回撤 −40%。2026 年最弱。"},
+        {"date": "2026-10-18", "title": "槓桿、資金、逐倉或全倉", "file": "signals/report_leverage_sizing_20261018.md", "status": "live",
+         "summary": "槓桿不改風險；逐倉約 5 倍、每筆 0.25%。0.5% 風險回撤 −59%、1% 回撤 −83%。"}
+      ]
+    },
+    {
+      "name": "實盤維加斯：規則優化",
+      "items": [
+        {"date": "2026-10-18", "title": "四組止盈階梯", "file": "signals/report_tp_ladder_20261018.md", "status": "keep",
+         "summary": "勝率 50% 以上的組合裡 1/3/5R 最好；2/4/6R 賺最多但勝率 39%、回撤 −42%。"},
+        {"date": "2026-10-18", "title": "TP1 後保本 vs TP2 後保本", "file": "signals/report_be_timing_20261018.md", "status": "pending",
+         "summary": "TP2 後才保本每筆 +0.147R → +0.214R，但勝率 54% → 31%、最長連虧 55 筆。"},
+        {"date": "2026-10-18", "title": "BTC 跌破 EMA200 不做多", "file": "signals/report_bear_nolong_20261018.md", "status": "rejected",
+         "summary": "被擋掉的多單平均 +0.09R，只在 2022 年讓回撤變小。"},
+        {"date": "2026-10-18", "title": "牛熊濾網", "file": "signals/report_regime_filter_20261018.md", "status": "rejected",
+         "summary": "EMA200、200 週均線分牛熊都讓績效變差；牛市裡的空單反而最賺。"},
+        {"date": "2026-10-15", "title": "出場統一、同幣只做一張", "file": "signals/report_vegas_trend_exit_unify_20261015.md", "status": "live",
+         "summary": "4H 改用 1/3/5R 出場；同幣同向 2H/4H 只做一張，回撤小約 4 個百分點。"},
+        {"date": "2026-10-15", "title": "止損單共同特徵", "file": "signals/report_vegas_trend_stoploss_profile_20261015.md", "status": "keep",
+         "summary": "近期止損單偏大 K、爆量，但這群歷史上最賺；沒有特徵能預測止損。"},
+        {"date": "2026-10-13", "title": "進場條件與選幣", "file": "signals/report_vegas_trend_entry_20261013.md", "status": "live",
+         "summary": "大部分濾網過不了樣本外，只留下 2H「ADX ≥ 24 不做」。"},
+        {"date": "2026-10-13", "title": "止損深入研究", "file": "signals/report_vegas_trend_stoploss_20261013.md", "status": "keep",
+         "summary": "96 種止損都沒有穩定贏過 1.5 ATR。"},
+        {"date": "2026-10-13", "title": "止損與止盈", "file": "signals/report_vegas_trend_exits_20261013.md", "status": "live",
+         "summary": "讓獲利跑比 1/2/3R 好，改成 1/3/5R 各平 1/4 + 追蹤止損。"},
+        {"date": "2026-10-12", "title": "勝率、獲利因子、期望值", "file": "signals/report_vegas_trend_metrics_20261012.md", "status": "info",
+         "summary": "舊出場下沒有組合同時過期望值 ≥ 0.1R 和獲利因子 ≥ 1.3 兩個門檻。"},
+        {"date": "2026-10-12", "title": "對照隨機進場", "file": "signals/report_vegas_trend_benchmarks_20261012.md", "status": "info",
+         "summary": "2H 每一段期間都贏隨機進場；4H 最近一年比較弱。"},
+        {"date": "2026-10-12", "title": "最近 30 天到 2 年", "file": "signals/report_vegas_trend_4H_periods_20261012.md", "status": "info",
+         "summary": "長期優勢是真的（t 5.3），近兩年變弱。"},
+        {"date": "2026-10-12", "title": "2H 的 RSI / MACD", "file": "signals/report_vegas_trend_2H_rsi_macd_20261012.md", "status": "live",
+         "summary": "收緊 RSI（多 54–70、空 30–46）在 2H 更有幫助。"},
+        {"date": "2026-10-12", "title": "4H 的 RSI / MACD", "file": "signals/report_vegas_trend_rsi_macd_20261012.md", "status": "live",
+         "summary": "大部分設定差異是雜訊；收緊 RSI 留下。"},
+        {"date": "2026-10-12", "title": "RSI / MACD 對調驗證", "file": "signals/report_vegas_trend_rsi_macd_reversed_20261012.md", "status": "live",
+         "summary": "前後段對調，收緊 RSI 還是贏。"},
+        {"date": "2026-10-12", "title": "多週期（幣安）", "file": "signals/report_timeframes_binance_20261012.md", "status": "info",
+         "summary": "4H 最穩、2H 次之、1H 是負的。"},
+        {"date": "2026-10-12", "title": "多週期（派網）", "file": "signals/report_timeframes_20261012.md", "status": "info",
+         "summary": "派網資料一樣是 4H 最穩；日線以上交易太少。"}
+      ]
+    },
+    {
+      "name": "其他策略",
+      "items": [
+        {"date": "2026-10-18", "title": "美股 / 商品代幣", "file": "signals/report_rwa_underlying_20261018.md", "status": "observe",
+         "summary": "用現貨長歷史補回測，維加斯在美股、商品都沒有優勢，維持只觀察。"},
+        {"date": "2026-10-18", "title": "諧波型態", "file": "signals/report_harmonic_20261018.md", "status": "rejected",
+         "summary": "9 種型態 × 1H/4H/日線全部沒有優勢，鯊魚和 AB=CD 穩定虧錢。"},
+        {"date": "2026-10-18", "title": "Threads 截圖策略", "file": "signals/report_threads_strategies_20261018.md", "status": "rejected",
+         "summary": "挑幣機器人、鯊魚諧波都虧；日線 EMA8/20 + 吞沒 +0.17R，但不顯著。"},
+        {"date": "2026-10-15", "title": "外包日反轉法", "file": "signals/report_outside_day_20261015.md", "status": "rejected",
+         "summary": "日線、4H、多空都在 0R 附近，和隨機進場一樣。"},
+        {"date": "2026-10-14", "title": "突破追多過濾", "file": "report_breakout_filters_20261014.md", "status": "observe",
+         "summary": "只做 RSI ≥ 75、量 ≥ 2 倍的突破比較好，放在 1H 觀察組。"},
+        {"date": "2026-10-13", "title": "基礎指標（深入版）", "file": "signals/report_basic_indicators_opus_max_20261013.md", "status": "rejected",
+         "summary": "45 種指標其實只有順勢、反轉兩派；反轉、背離都輸，2H 維加斯仍最好。"},
+        {"date": "2026-10-13", "title": "基礎指標（普通版）", "file": "signals/report_basic_indicators_opus_medium_20261013.md", "status": "rejected",
+         "summary": "40 種常見指標都沒贏維加斯。"},
+        {"date": "2026-10-12", "title": "訂單流", "file": "signals/report_orderflow_20261012.md", "status": "observe",
+         "summary": "CVD 背離最差；「價漲倉增」放觀察組。"},
+        {"date": "2026-10-12", "title": "SMC / ICT", "file": "signals/report_smc_ict_20261012.md", "status": "observe",
+         "summary": "只有 4H 掃流動性 → 結構轉變站得住，放觀察組。"},
+        {"date": "2026-10-12", "title": "強弱輪動、均值回歸、VWAP", "file": "signals/report_alt_strategies_20261012.md", "status": "rejected",
+         "summary": "輪動暫緩；均值回歸是負的；VWAP 沒有東西。"},
+        {"date": "2026-10-12", "title": "維加斯 + 突破（1H）", "file": "signals/report_combined_1h_20261012.md", "status": "rejected",
+         "summary": "1H 資料短，後半段變 0。"}
+      ]
+    },
+    {
+      "name": "外部訊號群",
+      "items": [
+        {"date": "2026-10-14", "title": "兩則訊號拆解", "file": "signals/report_group_signals_20261014.md", "status": "info",
+         "summary": "FLUID 是突破追多；HYPE 是日線多頭回檔買支撐。"},
+        {"date": "2026-10-12", "title": "驗證與前 100 名回測", "file": "signals/report_group_signals_top100_20261012.md", "status": "rejected",
+         "summary": "21 筆照單跟平均每筆 −0.10R。"},
+        {"date": "2026-10-12", "title": "訊號回推", "file": "signals/report_group_signals_20261012.md", "status": "rejected",
+         "summary": "推回的突破規則回測 14 個月，期望值接近 0。"}
+      ]
+    },
+    {
+      "name": "網格與定投",
+      "items": [
+        {"date": "2026-10-13", "title": "BTC 定投", "file": "dca/report_btc_dca_20261013.md", "status": "info",
+         "summary": "等低點才買輸給每天買；ahr999 > 1.2 暫停的版本 4 年視窗全贏。"},
+        {"date": "2026-10-12", "title": "網格改良第二輪", "file": "grid/report_round2_20261012.md", "status": "rejected",
+         "summary": "每個變形都虧：小賺很多次、大虧一次。"},
+        {"date": "2026-10-12", "title": "網格長週期", "file": "grid/report_cycle_20261012.md", "status": "rejected",
+         "summary": "拉長週期一樣沒有優勢。"},
+        {"date": "2026-10-12", "title": "網格回測", "file": "grid/report_20261012.md", "status": "rejected",
+         "summary": "合約網格已放棄。"}
+      ]
+    }
+  ]
+}

@@ -3,7 +3,7 @@
 用量化方法交易派網（Pionex）USDT 本位永續合約：程式掃描訊號、算價位與數量、追蹤出場、推播，
 **下單由人在派網 App 手動操作**。只用公開行情，**不需要也不存放任何 API Key**，不會自動下單。
 
-- 網站：https://dennyhty.github.io/grid-trading/ （每 15 分鐘更新，Telegram 推播）
+- 網站：https://dennyhty.github.io/grid-trading/ （每 15 分鐘更新，Telegram 推播）。分頁：訊號 / 績效（幣安自動交易、維加斯回測）/ 策略研究，見 [docs/website.md](docs/website.md)
 - [系統說明書](docs/system.md)：架構、策略上線/下架標準、每個策略的現況、風險規則
 - [操作手冊](docs/runbook.md)：收到訊號後在派網怎麼下單、持倉中怎麼改單、每週檢討
 - [研究報告索引](reports/README.md)：所有回測研究和結論
