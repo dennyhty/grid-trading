@@ -519,7 +519,7 @@ function closeDetail() {
   $("list-view").classList.remove("hidden");
   $("back").classList.add("hidden");
   $("subtitle").textContent = "訊號列表";
-  if (location.hash) history.replaceState(null, "", location.pathname);
+  if (location.hash.startsWith("#s=")) history.replaceState(null, "", location.pathname);
 }
 
 // ---------- 圖表 ----------

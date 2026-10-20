@@ -1,0 +1,16 @@
+# 把自動交易紀錄提供給網站（只讀 trader_state，不讀 trader.env、不需要金鑰）。安裝方法見 docs/website.md
+[Unit]
+Description=Binance trader ledger feed for the website
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=trader
+WorkingDirectory=/home/trader/grid-trading
+EnvironmentFile=/home/trader/feed.env
+ExecStart=/usr/bin/python3 deploy/trader_feed.py --state-dir trader_state --port 8787
+Restart=always
+RestartSec=30
+
+[Install]
+WantedBy=multi-user.target
