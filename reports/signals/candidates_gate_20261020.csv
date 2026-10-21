@@ -1,0 +1,37 @@
+family,headline,check,label,status,value,threshold,detail
+cand_daily_donchian,N20|sl3|chan,n_trades,筆數,pass,5763,>= 300,共 5763 筆
+cand_daily_donchian,N20|sl3|chan,mean_in_sample,樣本內平均 R > 0,pass,0.34703803091312907,> 0,樣本內（< 2024-01-01）2983 筆，平均 +0.3470R
+cand_daily_donchian,N20|sl3|chan,mean_oos,樣本外平均 R > 0,fail,-0.07419633125366716,> 0 且筆數 >= 100,樣本外（>= 2024-01-01）2780 筆，平均 -0.0742R
+cand_daily_donchian,N20|sl3|chan,cluster_t,嚴格群集 t（四種分群取最小）,fail,1.58573465321542,4.0273810750728245,進場日+方向 3.00、出場日+方向 2.56、ISO週(進場) 1.96、月(進場) 1.59；試了 1773 組設定，門檻 4.03；未校正門檻 2.0：最小 t 也未達標
+cand_daily_donchian,N20|sl3|chan,deflated_sharpe,Deflated Sharpe,fail,0.11834268752678268,>= 0.95,年化夏普 0.99，2397 天，偏態 11.04，峰度 184.9，試驗數 1773
+cand_daily_donchian,N20|sl3|chan,beats_random,贏過隨機進場,fail,1.2320098012273102,> 2,策略 - 隨機 = +0.0647R，標準誤 0.0525（7 個共同年份，3 年為正；隨機基準 11783 筆）
+cand_daily_donchian,N20|sl3|chan,plateau,參數高原,pass,"[0.3771959527767547, 0.17645956933005033]",所有鄰近 > 0 且 >= 主設定的 50%,主設定 +0.1438R；2 組鄰近：+0.3772、+0.1765
+cand_daily_donchian,N20|sl3|chan,baseline_corr,與實盤基準的相關性,pass,-0.025058994992310856,< 0.5,出場日加總的日報酬相關係數（2434 天，基準 17549 筆）
+cand_daily_donchian,N20|sl3|chan,robust_drop_coins,拿掉前 5 大幣後 > 0,pass,0.09735357074701288,> 0,"拿掉總 R 最高的 5 個幣（FTMUSDT, AVAXUSDT, MATICUSDT, EGLDUSDT, ADAUSDT）後平均 +0.0974R"
+cand_daily_donchian,N20|sl3|chan,robust_drop_year,拿掉最好的一年後 > 0,pass,0.008934416652702566,> 0,拿掉最好的一年（2021，合計 +784.4R）後平均 +0.0089R
+cand_daily_donchian,N20|sl3|chan,robust_drop_days,拿掉最好的 5 個出場日後 > 0,pass,0.05484638326712675,> 0,"拿掉最好的 5 個出場日（2021-03-22, 2021-03-24, 2021-05-12, 2024-01-03, 2021-03-12；合計 +517.1R）後平均 +0.0548R"
+cand_daily_donchian,N20|sl3|chan,sides,多空拆分（參考）,info,"{""long"": 0.3582958968017605, ""short"": -0.03269132494448323}",,多單 2602 筆 +0.3583R；空單 3161 筆 -0.0327R
+cand_daily_squeeze,q0.1|sl1.5|ladder,n_trades,筆數,pass,2592,>= 300,共 2592 筆
+cand_daily_squeeze,q0.1|sl1.5|ladder,mean_in_sample,樣本內平均 R > 0,pass,0.060732652819703706,> 0,樣本內（< 2024-01-01）1393 筆，平均 +0.0607R
+cand_daily_squeeze,q0.1|sl1.5|ladder,mean_oos,樣本外平均 R > 0,fail,-0.0419008419101873,> 0 且筆數 >= 100,樣本外（>= 2024-01-01）1199 筆，平均 -0.0419R
+cand_daily_squeeze,q0.1|sl1.5|ladder,cluster_t,嚴格群集 t（四種分群取最小）,fail,0.20160876419049018,4.0273810750728245,進場日+方向 0.26、出場日+方向 0.34、ISO週(進場) 0.21、月(進場) 0.20；試了 1773 組設定，門檻 4.03；未校正門檻 2.0：最小 t 也未達標
+cand_daily_squeeze,q0.1|sl1.5|ladder,deflated_sharpe,Deflated Sharpe,fail,0.0010226310568742236,>= 0.95,年化夏普 0.14，2313 天，偏態 1.15，峰度 41.0，試驗數 1773
+cand_daily_squeeze,q0.1|sl1.5|ladder,beats_random,贏過隨機進場,fail,-0.17460350950181547,> 2,策略 - 隨機 = -0.0092R，標準誤 0.0525（7 個共同年份，2 年為正；隨機基準 5973 筆）
+cand_daily_squeeze,q0.1|sl1.5|ladder,plateau,參數高原,fail,"[0.0011892308593254497, -0.07504657977796286]",所有鄰近 > 0 且 >= 主設定的 50%,主設定 +0.0133R；2 組鄰近：+0.0012、-0.0750
+cand_daily_squeeze,q0.1|sl1.5|ladder,baseline_corr,與實盤基準的相關性,pass,0.0008182554151797559,< 0.5,出場日加總的日報酬相關係數（2434 天，基準 17549 筆）
+cand_daily_squeeze,q0.1|sl1.5|ladder,robust_drop_coins,拿掉前 5 大幣後 > 0,fail,-0.012647890218744748,> 0,"拿掉總 R 最高的 5 個幣（MANAUSDT, TRXUSDT, ETHUSDT, BNBUSDT, GRTUSDT）後平均 -0.0126R"
+cand_daily_squeeze,q0.1|sl1.5|ladder,robust_drop_year,拿掉最好的一年後 > 0,fail,-0.06795676358942303,> 0,拿掉最好的一年（2023，合計 +177.1R）後平均 -0.0680R
+cand_daily_squeeze,q0.1|sl1.5|ladder,robust_drop_days,拿掉最好的 5 個出場日後 > 0,fail,-0.02142819925290541,> 0,"拿掉最好的 5 個出場日（2025-10-11, 2023-04-26, 2023-01-18, 2023-04-30, 2021-10-31；合計 +89.0R）後平均 -0.0214R"
+cand_daily_squeeze,q0.1|sl1.5|ladder,sides,多空拆分（參考）,info,"{""long"": -0.008115685815568806, ""short"": 0.03512969557513144}",,多單 1311 筆 -0.0081R；空單 1281 筆 +0.0351R
+cand_xsec_portfolio,combo|q0.3,n_trades,筆數,pass,120343,>= 300,共 120343 筆
+cand_xsec_portfolio,combo|q0.3,mean_in_sample,樣本內平均 R > 0,pass,0.0006608476371378004,> 0,樣本內（< 2024-01-01）65107 筆，平均 +0.0007R
+cand_xsec_portfolio,combo|q0.3,mean_oos,樣本外平均 R > 0,pass,0.0035942667243522687,> 0 且筆數 >= 100,樣本外（>= 2024-01-01）55236 筆，平均 +0.0036R
+cand_xsec_portfolio,combo|q0.3,cluster_t,嚴格群集 t（四種分群取最小）,fail,1.060096995450135,4.0273810750728245,進場日+方向 1.42、出場日+方向 1.42、ISO週(進場) 1.26、月(進場) 1.06；試了 1773 組設定，門檻 4.03；未校正門檻 2.0：最小 t 也未達標
+cand_xsec_portfolio,combo|q0.3,deflated_sharpe,Deflated Sharpe,fail,0.023593292659092435,>= 0.95,年化夏普 0.55，2383 天，偏態 -0.31，峰度 18.8，試驗數 1773
+cand_xsec_portfolio,combo|q0.3,beats_random,贏過隨機進場,pass,2.2655780532326393,> 2,策略 - 隨機 = +0.0035R，標準誤 0.0015（7 個共同年份，5 年為正；隨機基準 363352 筆）
+cand_xsec_portfolio,combo|q0.3,plateau,參數高原,pass,[0.0018784627613518269],所有鄰近 > 0 且 >= 主設定的 50%,主設定 +0.0020R；1 組鄰近：+0.0019
+cand_xsec_portfolio,combo|q0.3,baseline_corr,與實盤基準的相關性,pass,0.0016850640395637687,< 0.5,出場日加總的日報酬相關係數（2434 天，基準 17549 筆）
+cand_xsec_portfolio,combo|q0.3,robust_drop_coins,拿掉前 5 大幣後 > 0,fail,-0.00027389346606355617,> 0,"拿掉總 R 最高的 5 個幣（XRPUSDT, BNBUSDT, TRXUSDT, 1000SHIBUSDT, DOGEUSDT）後平均 -0.0003R"
+cand_xsec_portfolio,combo|q0.3,robust_drop_year,拿掉最好的一年後 > 0,pass,0.0012523294743531429,> 0,拿掉最好的一年（2024，合計 +116.5R）後平均 +0.0013R
+cand_xsec_portfolio,combo|q0.3,robust_drop_days,拿掉最好的 5 個出場日後 > 0,pass,0.0011088802812668803,> 0,"拿掉最好的 5 個出場日（2024-03-02, 2021-10-31, 2024-03-01, 2020-11-21, 2021-01-09；合計 +108.4R）後平均 +0.0011R"
+cand_xsec_portfolio,combo|q0.3,sides,多空拆分（參考）,info,"{""long"": 0.002007251970596152, ""short"": NaN}",,多單 120343 筆 +0.0020R；空單 0 筆 +nanR

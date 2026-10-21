@@ -1,0 +1,37 @@
+config,headline,check,label,status,value,threshold,detail
+combo|q0.3|index,True,n_trades,筆數,pass,132750,>= 300,共 132750 筆
+combo|q0.3|index,True,mean_in_sample,樣本內平均 R > 0,pass,0.0021947705763410777,> 0,樣本內（< 2024-01-01）76524 筆，平均 +0.0022R
+combo|q0.3|index,True,mean_oos,樣本外平均 R > 0,pass,0.005411712271812646,> 0 且筆數 >= 100,樣本外（>= 2024-01-01）56226 筆，平均 +0.0054R
+combo|q0.3|index,True,cluster_t,嚴格群集 t（四種分群取最小）,fail,1.847451391135254,4.0284398103344845,進場日+方向 2.49、出場日+方向 2.49、ISO週(進場) 2.10、月(進場) 1.85；試了 1781 組設定，門檻 4.03；未校正門檻 2.0：最小 t 也未達標
+combo|q0.3|index,True,deflated_sharpe,Deflated Sharpe,fail,0.17874511580190322,>= 0.95,年化夏普 0.87，2985 天，偏態 -0.11，峰度 20.1，試驗數 1781
+combo|q0.3|index,True,beats_random,贏過隨機進場,pass,3.8088274311692967,> 2,策略 - 隨機 = +0.0058R，標準誤 0.0015（9 個共同年份，7 年為正；隨機基準 398250 筆）
+combo|q0.3|index,True,plateau,參數高原,pass,[0.003649538661007063],所有鄰近 > 0 且 >= 主設定的 50%,主設定 +0.0036R；1 組鄰近：+0.0036
+combo|q0.3|index,True,baseline_corr,與實盤基準的相關性,pass,0.009316475608899484,< 0.5,出場日加總的日報酬相關係數（2985 天，基準 17549 筆）
+combo|q0.3|index,True,robust_drop_coins,拿掉前 5 大幣後 > 0,pass,0.0016344748419486483,> 0,"拿掉總 R 最高的 5 個幣（XRPUSDT, TRXUSDT, BNBUSDT, BTCUSDT, 1000SHIBUSDT）後平均 +0.0016R"
+combo|q0.3|index,True,robust_drop_year,拿掉最好的一年後 > 0,pass,0.0028311483891114687,> 0,拿掉最好的一年（2024，合計 +155.5R）後平均 +0.0028R
+combo|q0.3|index,True,robust_drop_days,拿掉最好的 5 個出場日後 > 0,pass,0.002692961254756442,> 0,"拿掉最好的 5 個出場日（2026-08-21, 2026-08-19, 2021-10-31, 2020-11-21, 2021-01-09；合計 +115.4R）後平均 +0.0027R"
+combo|q0.3|index,True,sides,多空拆分（參考）,info,"{""long"": 0.0035572998702739175, ""short"": NaN}",,多單 132750 筆 +0.0036R；空單 0 筆 +nanR
+combo|q0.3|btc,False,n_trades,筆數,pass,130038,>= 300,共 130038 筆
+combo|q0.3|btc,False,mean_in_sample,樣本內平均 R > 0,pass,0.0010614749523895827,> 0,樣本內（< 2024-01-01）74802 筆，平均 +0.0011R
+combo|q0.3|btc,False,mean_oos,樣本外平均 R > 0,pass,0.0035942667243522683,> 0 且筆數 >= 100,樣本外（>= 2024-01-01）55236 筆，平均 +0.0036R
+combo|q0.3|btc,False,cluster_t,嚴格群集 t（四種分群取最小）,fail,1.2065890526011067,4.0284398103344845,進場日+方向 1.60、出場日+方向 1.60、ISO週(進場) 1.43、月(進場) 1.21；試了 1781 組設定，門檻 4.03；未校正門檻 2.0：最小 t 也未達標
+combo|q0.3|btc,False,deflated_sharpe,Deflated Sharpe,fail,0.036007625011808264,>= 0.95,年化夏普 0.56，2985 天，偏態 -0.32，峰度 22.1，試驗數 1781
+combo|q0.3|btc,False,beats_random,贏過隨機進場,pass,3.033374010688682,> 2,策略 - 隨機 = +0.0043R，標準誤 0.0014（9 個共同年份，7 年為正；隨機基準 393154 筆）
+combo|q0.3|btc,False,plateau,參數高原,pass,[0.002030043205948964],所有鄰近 > 0 且 >= 主設定的 50%,主設定 +0.0021R；1 組鄰近：+0.0020
+combo|q0.3|btc,False,baseline_corr,與實盤基準的相關性,pass,0.0017735597163080453,< 0.5,出場日加總的日報酬相關係數（2985 天，基準 17549 筆）
+combo|q0.3|btc,False,robust_drop_coins,拿掉前 5 大幣後 > 0,pass,0.00012295492271568054,> 0,"拿掉總 R 最高的 5 個幣（XRPUSDT, TRXUSDT, BNBUSDT, 1000SHIBUSDT, DOGEUSDT）後平均 +0.0001R"
+combo|q0.3|btc,False,robust_drop_year,拿掉最好的一年後 > 0,pass,0.001473587707849249,> 0,拿掉最好的一年（2024，合計 +116.5R）後平均 +0.0015R
+combo|q0.3|btc,False,robust_drop_days,拿掉最好的 5 個出場日後 > 0,pass,0.0013062981365985723,> 0,"拿掉最好的 5 個出場日（2024-03-02, 2021-10-31, 2024-03-01, 2020-11-21, 2021-01-09；合計 +108.4R）後平均 +0.0013R"
+combo|q0.3|btc,False,sides,多空拆分（參考）,info,"{""long"": 0.0021373242142678868, ""short"": NaN}",,多單 130038 筆 +0.0021R；空單 0 筆 +nanR
+combo|q0.3|none,False,n_trades,筆數,pass,129842,>= 300,共 129842 筆
+combo|q0.3|none,False,mean_in_sample,樣本內平均 R > 0,pass,0.0009151361981157676,> 0,樣本內（< 2024-01-01）74620 筆，平均 +0.0009R
+combo|q0.3|none,False,mean_oos,樣本外平均 R > 0,pass,0.005047956114866935,> 0 且筆數 >= 100,樣本外（>= 2024-01-01）55222 筆，平均 +0.0050R
+combo|q0.3|none,False,cluster_t,嚴格群集 t（四種分群取最小）,fail,1.3574034320312829,4.0284398103344845,進場日+方向 1.51、出場日+方向 1.51、ISO週(進場) 1.44、月(進場) 1.36；試了 1781 組設定，門檻 4.03；未校正門檻 2.0：最小 t 也未達標
+combo|q0.3|none,False,deflated_sharpe,Deflated Sharpe,fail,0.029815841000595755,>= 0.95,年化夏普 0.53，2985 天，偏態 -0.57，峰度 15.9，試驗數 1781
+combo|q0.3|none,False,beats_random,贏過隨機進場,pass,2.6130874466802476,> 2,策略 - 隨機 = +0.0048R，標準誤 0.0018（9 個共同年份，8 年為正；隨機基準 389526 筆）
+combo|q0.3|none,False,plateau,參數高原,pass,[0.0027727154329749083],所有鄰近 > 0 且 >= 主設定的 50%,主設定 +0.0027R；1 組鄰近：+0.0028
+combo|q0.3|none,False,baseline_corr,與實盤基準的相關性,pass,0.08471211139869181,< 0.5,出場日加總的日報酬相關係數（2985 天，基準 17549 筆）
+combo|q0.3|none,False,robust_drop_coins,拿掉前 5 大幣後 > 0,pass,0.0010278007753018533,> 0,"拿掉總 R 最高的 5 個幣（XRPUSDT, TRXUSDT, BNBUSDT, 1000SHIBUSDT, BTCUSDT）後平均 +0.0010R"
+combo|q0.3|none,False,robust_drop_year,拿掉最好的一年後 > 0,pass,0.0021220528325779317,> 0,拿掉最好的一年（2025，合計 +112.5R）後平均 +0.0021R
+combo|q0.3|none,False,robust_drop_days,拿掉最好的 5 個出場日後 > 0,pass,0.0017235251654829724,> 0,"拿掉最好的 5 個出場日（2026-08-22, 2025-10-10, 2021-10-31, 2023-06-10, 2025-01-18；合計 +123.7R）後平均 +0.0017R"
+combo|q0.3|none,False,sides,多空拆分（參考）,info,"{""long"": 0.00267283079187459, ""short"": NaN}",,多單 129842 筆 +0.0027R；空單 0 筆 +nanR
