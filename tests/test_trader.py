@@ -82,6 +82,7 @@ class FakeExchange:
         self.hedge = False
         self.fail_stop = False
         self.done = {}
+        self.client_ids = set()
 
     # 行情
     def klines(self, symbol, interval, limit=500):
@@ -119,6 +120,10 @@ class FakeExchange:
         if kind == "STOP_MARKET" and self.fail_stop:
             from grid_trading.trader.binance import BinanceError
             raise BinanceError(400, -2021, "Order would immediately trigger.")
+        if client_id in self.client_ids:
+            from grid_trading.trader.binance import BinanceError
+            raise BinanceError(400, -4116, "ClientOrderId is duplicated.")
+        self.client_ids.add(client_id)
         oid = self.next_id
         self.next_id += 1
         self.algo[oid] = {"algoId": oid, "symbol": symbol, "ps": ps, "type": kind, "trigger": float(trigger),
@@ -332,3 +337,18 @@ def test_reconcile_migrates_old_positions(tmp_path):
     assert pos["fills"] == [[pytest.approx(0.156), pytest.approx(104.0)]]
     stops = [o for o in ex.algo.values() if o["type"] == "STOP_MARKET"]
     assert len(stops) == 1 and stops[0]["qty"] == pytest.approx(0.625 - 0.156)
+
+
+def test_same_bar_different_symbols_get_unique_client_ids(tmp_path):
+    import dataclasses
+    ex = FakeExchange()
+    broker = LiveBroker(ex, ex, Config())
+    tr, sink = make_trader(tmp_path, broker, ex)
+    tr.filters["YUSDT"] = F
+    a = make_signal(side=SHORT)
+    b = dataclasses.replace(a, symbol="YUSDT")
+    tr.try_open(a)
+    tr.try_open(b)
+    assert len(tr.store.positions) == 2, sink
+    assert not any("失敗" in m for m in sink)
+    assert len(ex.client_ids) == 8  # 每張單 1 止損 + 3 止盈

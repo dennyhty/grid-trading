@@ -17,6 +17,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -300,6 +301,16 @@ class PaperBroker:
 
 
 # ---------- 測試網 / 實盤 ----------
+def client_tag(sig: Signal) -> str:
+    """掛單用的 client id 前綴。幣安要求同一帳戶內不能重複，所以要帶幣名（同一根 K 線常有好幾個幣同時出訊號）；
+    id 最長 36 字元，後面還要接 e / s12 / t1 等尾巴，太長就把幣名縮成雜湊。"""
+    name = "".join(c for c in sig.symbol if c.isalnum())
+    tag = f"v{sig.interval}{int(sig.time.timestamp())}{sig.side[0]}{name}"
+    if len(tag) > 30:
+        tag = f"v{sig.interval}{int(sig.time.timestamp())}{sig.side[0]}{hashlib.md5(sig.symbol.encode()).hexdigest()[:10]}"
+    return tag
+
+
 class LiveBroker:
     """同一個幣同方向可能同時有 2H 和 4H 兩張單，在幣安上會合成同一個倉位（雙向持倉只有一個 LONG / SHORT），
     所以每張單的止損、止盈都用自己的數量掛，成交與否看各自條件單的狀態，不看合併後的持倉數量。
@@ -382,7 +393,7 @@ class LiveBroker:
         d = sig.direction
         ps = sig.side  # 雙向持倉：LONG / SHORT
         buy, sell = ("BUY", "SELL") if d > 0 else ("SELL", "BUY")
-        tag = f"vt{sig.interval}{int(sig.time.timestamp())}"
+        tag = client_tag(sig)
         order = self.client.market_order(sig.symbol, buy, ps, fmt(size.steps * f.step, f.step), f"{tag}e")
         qty = float(order.get("executedQty") or 0)
         entry = float(order.get("avgPrice") or 0) or self.client.price(sig.symbol)
