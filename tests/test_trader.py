@@ -352,3 +352,32 @@ def test_same_bar_different_symbols_get_unique_client_ids(tmp_path):
     assert len(tr.store.positions) == 2, sink
     assert not any("失敗" in m for m in sink)
     assert len(ex.client_ids) == 8  # 每張單 1 止損 + 3 止盈
+
+
+def test_stop_triggering_waits_and_crossed_stop_closes_at_market(tmp_path):
+    from grid_trading.trader.binance import BinanceError
+    ex = FakeExchange(price=100.0, df=candles([(101, 99, 100)] * 3))
+    tr, sink = make_trader(tmp_path, LiveBroker(ex, ex, Config()), ex)
+    tr.try_open(make_signal())
+    pid = next(iter(tr.store.positions))
+    pos = tr.store.positions[pid]
+    now = T0 + pd.Timedelta(minutes=30)
+    # 止損剛觸發：已不在掛單清單，狀態 TRIGGERING，不能當成「不見了」去補掛
+    o = ex.algo.pop(pos["stop_id"])
+    ex.done[pos["stop_id"]] = {**o, "algoStatus": "TRIGGERING"}
+    tr.step_manage(now)
+    assert pid in tr.store.positions and not any("失敗" in m for m in sink)
+    assert len([o for o in ex.algo.values() if o["type"] == "STOP_MARKET"]) == 0
+    # 狀態是 CANCELED（真的不見了），補掛時價格已越過止損（-2021）：市價平倉，不要一直失敗
+    ex.done[pos["stop_id"]]["algoStatus"] = "CANCELED"
+    real = ex.conditional_order
+
+    def crossed(symbol, side, ps, kind, trigger, quantity=None, client_id=None):
+        if kind == "STOP_MARKET":
+            raise BinanceError(400, -2021, "Order would immediately trigger.")
+        return real(symbol, side, ps, kind, trigger, quantity, client_id)
+
+    ex.conditional_order = crossed
+    tr.step_manage(now)
+    assert pid not in tr.store.positions and not any("失敗" in m for m in sink)
+    assert any("市價平倉" in m for m in sink) and len(tr.store.ledger) == 1
