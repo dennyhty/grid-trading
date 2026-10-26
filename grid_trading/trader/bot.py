@@ -232,6 +232,7 @@ class Trader:
                     self.notify(msg)
                 self.store.save()
                 continue
+            pos.pop("last_error", None)  # 這輪沒出錯，之後同樣的錯誤再出現要再通知一次
             if result is not None:  # 已平倉：result 是實現損益（USDT）
                 r = result / pos["base_usdt"] if pos.get("base_usdt") else 0.0
                 self.store.ledger.append({"id": pid, "symbol": pos["symbol"], "interval": pos["interval"],
@@ -334,7 +335,8 @@ class LiveBroker:
         return self._open[symbol]
 
     def status(self, pos: dict, oid) -> tuple[str, float]:
-        """條件單的狀態：("open" / "filled" / "gone", 成交價)。"""
+        """條件單的狀態：("open" / "filled" / "pending" / "gone", 成交價)。
+        pending 是剛觸發、幣安還在送出市價單（TRIGGERING）：這時掛單清單裡已經沒有它，但還不算成交也不是不見，下一輪再看。"""
         if oid is None:
             return "gone", 0.0
         if oid in self.open_ids(pos["symbol"]):
@@ -342,7 +344,9 @@ class LiveBroker:
         o = self.client.algo_order(oid)
         st = str(o.get("algoStatus") or "").upper()
         price = float(o.get("actualPrice") or 0) or float(o.get("triggerPrice") or 0)
-        return ("filled" if st in self.FILLED else "gone"), price
+        if st in self.FILLED:
+            return "filled", price
+        return ("pending" if st == "TRIGGERING" else "gone"), price
 
     def ensure_setup(self, symbol: str, store: Store, leverage: int) -> None:
         """雙向持倉、逐倉；槓桿用 leverage（每個幣記住目前設定，要更低時才改）。"""
@@ -490,9 +494,19 @@ class LiveBroker:
             pos["fills"].append([pos["remaining"], price or pos["stop"]])
             pos["remaining"] = 0.0
             return self.finish(pos)
+        if st == "pending":  # 止損剛觸發，等下一輪看成交結果
+            return None
         if st == "gone":  # 不是成交卻不見了（被手動取消之類）：補掛
             pos["stop_version"] = pos.get("stop_version", 0) + 1
-            pos["stop_id"] = self._place_stop(pos, pos["stop"], pos["stop_version"])
+            try:
+                pos["stop_id"] = self._place_stop(pos, pos["stop"], pos["stop_version"])
+            except BinanceError as e:
+                if e.code != -2021:  # -2021：止損價已經被價格越過，掛不上去
+                    raise
+                pos["stop_id"] = None
+                self._close_rest(pos, f"m{pos['stop_version']}")
+                notify(f"{name}：止損單不見了，而且價格已越過 {pos['stop']:.6g}，已市價平倉")
+                return self.finish(pos)
             notify(f"{name}：止損單不見了，已補掛在 {pos['stop']:.6g}")
         d = 1 if pos["side"] == LONG else -1
         while pos["tps_hit"] < 3:
