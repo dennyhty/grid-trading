@@ -113,6 +113,9 @@ class FakeExchange:
     def market_order(self, symbol, side, ps, quantity, client_id):
         q = float(quantity)
         opening = (side == "BUY") == (ps == "LONG")
+        if not opening and self.pos.get((symbol, ps), 0.0) < q - 1e-9:
+            from grid_trading.trader.binance import BinanceError
+            raise BinanceError(400, -2022, "ReduceOnly Order is rejected.")
         self.pos[(symbol, ps)] = self.pos.get((symbol, ps), 0.0) + (q if opening else -q)
         return {"executedQty": quantity, "avgPrice": str(self.px)}
 
@@ -124,6 +127,9 @@ class FakeExchange:
             from grid_trading.trader.binance import BinanceError
             raise BinanceError(400, -4116, "ClientOrderId is duplicated.")
         self.client_ids.add(client_id)
+        if quantity is not None and float(quantity) > self.pos.get((symbol, ps), 0.0) + 1e-9:
+            from grid_trading.trader.binance import BinanceError
+            raise BinanceError(400, -2022, "ReduceOnly Order is rejected.")
         oid = self.next_id
         self.next_id += 1
         self.algo[oid] = {"algoId": oid, "symbol": symbol, "ps": ps, "type": kind, "trigger": float(trigger),
@@ -381,3 +387,32 @@ def test_stop_triggering_waits_and_crossed_stop_closes_at_market(tmp_path):
     tr.step_manage(now)
     assert pid not in tr.store.positions and not any("失敗" in m for m in sink)
     assert any("市價平倉" in m for m in sink) and len(tr.store.ledger) == 1
+
+
+def test_missing_stop_after_tp_fill_is_replaced_with_reduced_quantity(tmp_path):
+    """止盈成交後，交易所把原本全數量的止損單取消了：要先處理止盈，再用剩下的數量重掛，不能 -2022。"""
+    ex = FakeExchange(price=100.0, df=candles([(101, 99, 100)] * 3))
+    tr, sink = make_trader(tmp_path, LiveBroker(ex, ex, Config()), ex)
+    tr.try_open(make_signal())
+    pid = next(iter(tr.store.positions))
+    pos = tr.store.positions[pid]
+    ex.trigger("TAKE_PROFIT_MARKET", 0)
+    ex.cancel_conditional(pos["stop_id"])
+    tr.step_manage(T0 + pd.Timedelta(minutes=30))
+    assert not any("失敗" in m for m in sink), sink
+    assert pos["tps_hit"] == 1 and pos["stop_id"] in ex.algo
+    assert ex.algo[pos["stop_id"]]["qty"] == pytest.approx(pos["remaining"])
+
+
+def test_missing_stop_on_flat_position_is_booked_not_raised(tmp_path):
+    ex = FakeExchange(price=100.0, df=candles([(101, 99, 100)] * 3))
+    tr, sink = make_trader(tmp_path, LiveBroker(ex, ex, Config()), ex)
+    tr.try_open(make_signal())
+    pid = next(iter(tr.store.positions))
+    pos = tr.store.positions[pid]
+    ex.pos[(pos["symbol"], pos["side"])] = 0.0   # 倉位被別的單平掉了
+    ex.cancel_conditional(pos["stop_id"])
+    tr.step_manage(T0 + pd.Timedelta(minutes=30))
+    assert pid not in tr.store.positions and len(tr.store.ledger) == 1
+    assert not any("失敗" in m for m in sink), sink
+    assert any("已經沒有這個倉位" in m and "CANCELED" in m for m in sink)

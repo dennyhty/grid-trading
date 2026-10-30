@@ -344,6 +344,7 @@ class LiveBroker:
         o = self.client.algo_order(oid)
         st = str(o.get("algoStatus") or "").upper()
         price = float(o.get("actualPrice") or 0) or float(o.get("triggerPrice") or 0)
+        pos["last_algo_status"] = st  # 補掛時寫進推播，之後才查得出止損單是怎麼不見的
         if st in self.FILLED:
             return "filled", price
         return ("pending" if st == "TRIGGERING" else "gone"), price
@@ -448,11 +449,20 @@ class LiveBroker:
         """市價平掉這張單剩下的數量，並記下成交。"""
         if pos["remaining"] <= pos["step"] / 2:
             return
-        r = self.client.market_order(pos["symbol"], pos["close_side"], pos["side"],
-                                     fmt(pos["remaining"], pos["step"]), f"{pos['tag']}{reason}")
+        try:
+            r = self.client.market_order(pos["symbol"], pos["close_side"], pos["side"],
+                                         fmt(pos["remaining"], pos["step"]), f"{pos['tag']}{reason}")
+        except BinanceError as e:
+            if e.code != -2022 or not self._flat(pos):  # -2022：倉位已經不在，沒東西可平
+                raise
+            r = {}  # 被別的單平掉了（止損或止盈已成交）：照目前價格記帳
         price = float(r.get("avgPrice") or 0) or self.client.price(pos["symbol"])
         pos["fills"].append([pos["remaining"], price])
         pos["remaining"] = 0.0
+
+    def _flat(self, pos: dict) -> bool:
+        """交易所上這個幣這一邊已經沒有倉位。"""
+        return self.client.positions().get((pos["symbol"], pos["side"]), 0.0) <= pos["step"] / 2
 
     def move_stop(self, pos: dict, price: float) -> None:
         """先掛新止損再取消舊的；掛不上時先取消再掛；還是不行（價格已越過）就市價平掉。"""
@@ -496,18 +506,9 @@ class LiveBroker:
             return self.finish(pos)
         if st == "pending":  # 止損剛觸發，等下一輪看成交結果
             return None
-        if st == "gone":  # 不是成交卻不見了（被手動取消之類）：補掛
-            pos["stop_version"] = pos.get("stop_version", 0) + 1
-            try:
-                pos["stop_id"] = self._place_stop(pos, pos["stop"], pos["stop_version"])
-            except BinanceError as e:
-                if e.code != -2021:  # -2021：止損價已經被價格越過，掛不上去
-                    raise
-                pos["stop_id"] = None
-                self._close_rest(pos, f"m{pos['stop_version']}")
-                notify(f"{name}：止損單不見了，而且價格已越過 {pos['stop']:.6g}，已市價平倉")
-                return self.finish(pos)
-            notify(f"{name}：止損單不見了，已補掛在 {pos['stop']:.6g}")
+        # 止損單不見了（不是成交）：先處理止盈成交再補掛。止盈成交後倉位變小，
+        # 用舊的剩餘數量補掛會被幣安以 -2022 拒絕；止盈的處理會順便用新的剩餘數量重掛止損。
+        stop_missing, stop_version = st == "gone", pos.get("stop_version", 0)
         d = 1 if pos["side"] == LONG else -1
         while pos["tps_hit"] < 3:
             n = pos["tps_hit"]
@@ -530,6 +531,24 @@ class LiveBroker:
                 self.move_stop(pos, pos["stop"])  # 數量改成最後剩下的那一份
         if pos["remaining"] <= pos["step"] / 2:
             return self.finish(pos)
+        if stop_missing and pos.get("stop_version", 0) == stop_version:  # 止盈沒有順便重掛
+            why = f"（交易所狀態 {pos.get('last_algo_status') or '查無'}）"
+            pos["stop_version"] = stop_version + 1
+            try:
+                pos["stop_id"] = self._place_stop(pos, pos["stop"], pos["stop_version"])
+            except BinanceError as e:
+                if e.code == -2021:  # 止損價已經被價格越過，掛不上去
+                    pos["stop_id"] = None
+                    self._close_rest(pos, f"m{pos['stop_version']}")
+                    notify(f"{name}：止損單不見了{why}，而且價格已越過 {pos['stop']:.6g}，已市價平倉")
+                    return self.finish(pos)
+                if e.code == -2022 and self._flat(pos):  # 倉位已經不在交易所
+                    pos["stop_id"] = None
+                    self._close_rest(pos, f"m{pos['stop_version']}")
+                    notify(f"{name}：止損單不見了{why}，交易所上已經沒有這個倉位，照目前價格記帳")
+                    return self.finish(pos)
+                raise
+            notify(f"{name}：止損單不見了{why}，已補掛在 {pos['stop']:.6g}")
         bar = BAR[pos["interval"]]
         if pos["tps_hit"] >= 3 and pos["trail"] > 0:
             # 追蹤止損：TP3 那根 K 線起的最高價（做多）/ 最低價（做空）往回 3 ATR，每根收盤後更新
