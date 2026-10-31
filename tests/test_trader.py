@@ -473,3 +473,23 @@ def test_stop_quantity_above_live_position_is_capped_and_reported(tmp_path):
     assert pos["stop_id"] in ex.algo
     assert ex.algo[pos["stop_id"]]["qty"] == pytest.approx(pos["remaining"] * 0.5, abs=0.001)
     assert any("交易所上只有" in m for m in sink), sink
+
+
+def test_startup_survives_position_that_is_already_flat_on_exchange(tmp_path):
+    """APT 的情況：程式記錄還有倉位、止損 id 是空的，交易所上已經空倉。啟動不能當掉，第一輪管理要結清。"""
+    ex = FakeExchange(price=100.0, df=candles([(101, 99, 100)] * 3))
+    broker = LiveBroker(ex, ex, Config())
+    tr, sink = make_trader(tmp_path, broker, ex)
+    tr.try_open(make_signal())
+    pid = next(iter(tr.store.positions))
+    pos = tr.store.positions[pid]
+    for oid in [pos["stop_id"]] + pos["tp_ids"]:
+        ex.cancel_conditional(oid)
+    ex.pos[(pos["symbol"], pos["side"])] = 0.0
+    pos["stop_id"] = None
+    pos["tps_hit"] = 3
+    pos["remaining"] = pos["slices"][3]
+    tr.broker.reconcile(tr.store, tr.notify)   # 不能丟例外
+    tr.step_manage(T0 + pd.Timedelta(minutes=30))
+    assert pid not in tr.store.positions and len(tr.store.ledger) == 1
+    assert any("已經沒有這個倉位" in m for m in sink), sink
