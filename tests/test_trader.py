@@ -126,10 +126,10 @@ class FakeExchange:
         if client_id in self.client_ids:
             from grid_trading.trader.binance import BinanceError
             raise BinanceError(400, -4116, "ClientOrderId is duplicated.")
-        self.client_ids.add(client_id)
         if quantity is not None and float(quantity) > self.pos.get((symbol, ps), 0.0) + 1e-9:
             from grid_trading.trader.binance import BinanceError
             raise BinanceError(400, -2022, "ReduceOnly Order is rejected.")
+        self.client_ids.add(client_id)  # 通過檢查、真的下單後才算用掉這個 id
         oid = self.next_id
         self.next_id += 1
         self.algo[oid] = {"algoId": oid, "symbol": symbol, "ps": ps, "type": kind, "trigger": float(trigger),
@@ -416,3 +416,60 @@ def test_missing_stop_on_flat_position_is_booked_not_raised(tmp_path):
     assert pid not in tr.store.positions and len(tr.store.ledger) == 1
     assert not any("失敗" in m for m in sink), sink
     assert any("已經沒有這個倉位" in m and "CANCELED" in m for m in sink)
+
+
+def test_client_tag_is_ascii_and_unique_for_non_ascii_symbols():
+    import dataclasses
+    import re
+    from grid_trading.trader.bot import client_tag
+    a = make_signal(side=LONG)
+    tags = {client_tag(dataclasses.replace(a, symbol=sym))
+            for sym in ("APTUSDT", "1000PEPEUSDT", "币安人生USDT", "我踏马来了USDT", "SOMEVERYLONGSYMBOLNAMEUSDT")}
+    assert len(tags) == 5
+    for t in tags:
+        assert re.fullmatch(r"[.A-Za-z0-9:/_-]{1,30}", t), t
+        assert re.fullmatch(r"[.A-Za-z0-9:/_-]{1,36}", t + "s12"), t
+
+
+def test_live_open_with_non_ascii_symbol_uses_legal_client_ids(tmp_path):
+    import dataclasses
+    import re
+    ex = FakeExchange()
+    ids = []
+    real_market, real_cond = ex.market_order, ex.conditional_order
+
+    def market(symbol, side, ps, quantity, client_id):
+        ids.append(client_id)
+        return real_market(symbol, side, ps, quantity, client_id)
+
+    def cond(symbol, side, ps, kind, trigger, quantity=None, client_id=None):
+        ids.append(client_id)
+        return real_cond(symbol, side, ps, kind, trigger, quantity, client_id)
+
+    ex.market_order, ex.conditional_order = market, cond
+    tr, sink = make_trader(tmp_path, LiveBroker(ex, ex, Config()), ex)
+    tr.filters["币安人生USDT"] = F
+    tr.try_open(dataclasses.replace(make_signal(), symbol="币安人生USDT"))
+    assert len(tr.store.positions) == 1, sink
+    assert ids and all(re.fullmatch(r"[.A-Za-z0-9:/_-]{1,36}", i) for i in ids), ids
+
+
+def test_binance_client_clean_id():
+    from grid_trading.trader.binance import clean_id
+    assert clean_id("v2H1L币安人生s1") == "v2H1L____s1"
+    assert all(c.isascii() for c in clean_id("币安人生"))
+    assert len(clean_id("a" * 50)) == 36 and clean_id(None) is None
+
+
+def test_stop_quantity_above_live_position_is_capped_and_reported(tmp_path):
+    ex = FakeExchange(price=100.0, df=candles([(101, 99, 100)] * 3))
+    tr, sink = make_trader(tmp_path, LiveBroker(ex, ex, Config()), ex)
+    tr.try_open(make_signal())
+    pid = next(iter(tr.store.positions))
+    pos = tr.store.positions[pid]
+    ex.pos[(pos["symbol"], pos["side"])] = pos["remaining"] * 0.5   # 交易所倉位比記錄少
+    ex.cancel_conditional(pos["stop_id"])
+    tr.step_manage(T0 + pd.Timedelta(minutes=30))
+    assert pos["stop_id"] in ex.algo
+    assert ex.algo[pos["stop_id"]]["qty"] == pytest.approx(pos["remaining"] * 0.5, abs=0.001)
+    assert any("交易所上只有" in m for m in sink), sink

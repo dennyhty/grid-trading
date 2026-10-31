@@ -75,6 +75,7 @@ systemctl enable --now binance-trader@testnet
 | 恢復 | `rm /home/trader/grid-trading/trader_state/pause` |
 | 看紀錄 | `journalctl -u binance-trader@testnet -f` |
 | 更新程式 | `su - trader -c 'cd grid-trading && git pull'`，再 `systemctl restart binance-trader@testnet` |
+| 檢查某個幣在程式和幣安上對不對得上（唯讀） | `su - trader -c 'cd grid-trading && set -a && . /home/trader/trader.env && set +a && .venv/bin/python deploy/trader_diag.py APTUSDT'` |
 | 完全停止 | `systemctl stop binance-trader@testnet`（交易所上的止損止盈還在，倉位不會沒保護） |
 
 ## 規則

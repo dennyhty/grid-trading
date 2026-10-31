@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
@@ -227,11 +228,15 @@ class Trader:
                 result = self.broker.manage(pos, now, self.notify)
             except Exception as e:
                 msg = f"{_pair(pos['symbol'])} {pos['interval']} 管理失敗：{e}"
+                if isinstance(e, BinanceError):
+                    msg += f"（程式記錄剩 {pos.get('remaining'):g}，止損 {pos.get('stop'):.6g}）"
                 if pos.get("last_error") != msg:  # 同樣的錯誤只推一次
                     pos["last_error"] = msg
                     self.notify(msg)
                 self.store.save()
                 continue
+            if pos.get("warn"):
+                self.notify(f"{_pair(pos['symbol'])} {pos['interval']}：{pos.pop('warn')}")
             pos.pop("last_error", None)  # 這輪沒出錯，之後同樣的錯誤再出現要再通知一次
             if result is not None:  # 已平倉：result 是實現損益（USDT）
                 r = result / pos["base_usdt"] if pos.get("base_usdt") else 0.0
@@ -304,12 +309,12 @@ class PaperBroker:
 # ---------- 測試網 / 實盤 ----------
 def client_tag(sig: Signal) -> str:
     """掛單用的 client id 前綴。幣安要求同一帳戶內不能重複，所以要帶幣名（同一根 K 線常有好幾個幣同時出訊號）；
-    id 最長 36 字元，後面還要接 e / s12 / t1 等尾巴，太長就把幣名縮成雜湊。"""
-    name = "".join(c for c in sig.symbol if c.isalnum())
-    tag = f"v{sig.interval}{int(sig.time.timestamp())}{sig.side[0]}{name}"
-    if len(tag) > 30:
-        tag = f"v{sig.interval}{int(sig.time.timestamp())}{sig.side[0]}{hashlib.md5(sig.symbol.encode()).hexdigest()[:10]}"
-    return tag
+    只能用 [.A-Za-z0-9:/_-]，最長 36 字元，後面還要接 e / s12 / t1 等尾巴。
+    幣名不是純英數字（例如 币安人生USDT）或太長就改用幣名的雜湊。"""
+    name = sig.symbol
+    if not re.fullmatch(r"[A-Za-z0-9]+", name) or len(name) > 14:
+        name = hashlib.md5(sig.symbol.encode()).hexdigest()[:10]
+    return f"v{sig.interval}{int(sig.time.timestamp())}{sig.side[0]}{name}"
 
 
 class LiveBroker:
@@ -438,9 +443,22 @@ class LiveBroker:
 
     def _place_stop(self, pos: dict, price: float, version: int):
         """止損用這張單剩下的數量掛（雙向持倉下 SELL+LONG / BUY+SHORT 只會減倉，不會反向開倉）。"""
-        r = self.client.conditional_order(pos["symbol"], pos["close_side"], pos["side"], "STOP_MARKET",
-                                          fmt(price, pos["tick"]), quantity=fmt(pos["remaining"], pos["step"]),
-                                          client_id=f"{pos['tag']}s{version}")
+        qty = pos["remaining"]
+        try:
+            r = self.client.conditional_order(pos["symbol"], pos["close_side"], pos["side"], "STOP_MARKET",
+                                              fmt(price, pos["tick"]), quantity=fmt(qty, pos["step"]),
+                                              client_id=f"{pos['tag']}s{version}")
+        except BinanceError as e:
+            if e.code != -2022:
+                raise
+            # 止損數量比交易所上的倉位大（記錄的剩餘數量和實際倉位對不上）：先用實際倉位掛，保住保護，並推播數字
+            live = self.client.positions().get((pos["symbol"], pos["side"]), 0.0)
+            if live <= pos["step"] / 2 or live >= qty:
+                raise
+            pos["warn"] = f"交易所上只有 {live:g}，程式記錄剩 {qty:g}，止損先用 {live:g} 掛"
+            r = self.client.conditional_order(pos["symbol"], pos["close_side"], pos["side"], "STOP_MARKET",
+                                              fmt(price, pos["tick"]), quantity=fmt(live, pos["step"]),
+                                              client_id=f"{pos['tag']}s{version}c")
         if pos["symbol"] in getattr(self, "_open", {}):
             self._open[pos["symbol"]].add(r.get("algoId"))  # 這一輪的掛單快取也要有新止損
         return r.get("algoId")
