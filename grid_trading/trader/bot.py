@@ -251,7 +251,10 @@ class Trader:
 
     def run(self, poll: float = 30, once: bool = False) -> None:
         self.notify(f"啟動：{len(self.symbols)} 個幣，持倉 {len(self.store.positions)} 張")
-        self.broker.reconcile(self.store, self.notify)
+        try:
+            self.broker.reconcile(self.store, self.notify)
+        except Exception as e:  # 啟動檢查出錯不能讓程式當掉重開（每次重開都會推播一次「啟動」）
+            print("啟動檢查失敗:", e, flush=True)
         self.store.save()
         while True:
             now = pd.Timestamp.now(tz="UTC")
@@ -374,7 +377,7 @@ class LiveBroker:
         return max(1, min(self.cfg.leverage, int(1 / (2 * stop_pct)) if stop_pct > 0 else self.cfg.leverage))
 
     def reconcile(self, store: Store, notify) -> None:
-        """啟動時比對：交易所有、狀態檔沒有的倉位只提醒，不碰；狀態檔的單止損不見（不是成交）就補掛。"""
+        """啟動時比對：交易所有、狀態檔沒有的倉位只提醒，不碰；舊版狀態檔的單補上新欄位。"""
         self.begin_step()
         migrated = [p for p in store.positions.values() if "remaining" not in p]
         for p in migrated:
@@ -390,13 +393,19 @@ class LiveBroker:
             if amt > expected.get(key, 0.0) + 1e-9:
                 notify(f"注意：{_pair(key[0])} {key[1]} 有 {amt}，比這個程式記錄的多，多出來的不會管理")
         for pos in migrated:
-            if self.status(pos, pos.get("stop_id"))[0] == "open" and pos["remaining"] > pos["step"] / 2:
-                self.move_stop(pos, pos["stop"])
+            try:
+                if self.status(pos, pos.get("stop_id"))[0] == "open" and pos["remaining"] > pos["step"] / 2:
+                    self.move_stop(pos, pos["stop"])
+            except Exception as e:  # 啟動時不能因為一張單出錯就整個程式當掉，之後每輪管理會再處理
+                print(f"{pos['symbol']} 啟動時移止損失敗: {e}", flush=True)
         for pos in store.positions.values():
-            if self.status(pos, pos.get("stop_id"))[0] == "gone":
-                pos["stop_version"] = pos.get("stop_version", 0) + 1
-                pos["stop_id"] = self._place_stop(pos, pos["stop"], pos["stop_version"])
-                notify(f"{_pair(pos['symbol'])} 止損單不見了，已補掛在 {pos['stop']:.6g}")
+            try:
+                if self.status(pos, pos.get("stop_id"))[0] == "gone":
+                    pos["stop_version"] = pos.get("stop_version", 0) + 1
+                    pos["stop_id"] = self._place_stop(pos, pos["stop"], pos["stop_version"])
+                    notify(f"{_pair(pos['symbol'])} 止損單不見了，已補掛在 {pos['stop']:.6g}")
+            except Exception as e:  # 補不上的（例如倉位已經不在）交給每輪的 manage() 處理，啟動不能因此當掉
+                print(f"{pos['symbol']} 啟動時補掛止損失敗，交給管理迴圈: {e}", flush=True)
 
     def open(self, sig: Signal, size, f: Filters, store: Store) -> dict | None:
         self.ensure_setup(sig.symbol, store, self.leverage_for(sig))
