@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import re
 import time
 import urllib.parse
 
@@ -18,6 +19,11 @@ import requests
 MAINNET = "https://fapi.binance.com"
 TESTNET = "https://testnet.binancefuture.com"
 INTERVALS = {"2H": "2h", "4H": "4h"}
+
+
+def clean_id(client_id: str | None) -> str | None:
+    """client id 只能用 [.A-Za-z0-9:/_-]、最長 36 字元，否則整張單會被 -1100 拒絕；不合的字元換成底線。"""
+    return None if client_id is None else re.sub(r"[^.A-Za-z0-9:/_-]", "_", client_id)[:36]
 
 
 class BinanceError(RuntimeError):
@@ -132,14 +138,14 @@ class BinanceFutures:
         """市價單。side 是 BUY/SELL，position_side 是 LONG/SHORT（雙向持倉）。回傳含 avgPrice、executedQty。"""
         return self._request("POST", "/fapi/v1/order", {
             "symbol": symbol, "side": side, "positionSide": position_side, "type": "MARKET",
-            "quantity": quantity, "newClientOrderId": client_id, "newOrderRespType": "RESULT"}, signed=True)
+            "quantity": quantity, "newClientOrderId": clean_id(client_id), "newOrderRespType": "RESULT"}, signed=True)
 
     def conditional_order(self, symbol: str, side: str, position_side: str, kind: str, trigger: str,
                           quantity: str | None = None, client_id: str | None = None) -> dict:
         """條件單：kind 是 STOP_MARKET 或 TAKE_PROFIT_MARKET，用標記價格觸發。quantity 為 None 時全部平倉。"""
         params = {"algoType": "CONDITIONAL", "symbol": symbol, "side": side, "positionSide": position_side,
                   "type": kind, "triggerPrice": trigger, "workingType": "MARK_PRICE",
-                  "clientAlgoId": client_id}
+                  "clientAlgoId": clean_id(client_id)}
         if quantity is None:
             params["closePosition"] = "true"
         else:
