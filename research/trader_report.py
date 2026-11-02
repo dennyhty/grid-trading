@@ -9,7 +9,8 @@ python -m research.trader_report --window all --file /path/to/trader.json   # �
 對照基準是誠實版回測（reports/signals/report_honest_backtest_20261020.md）：時點幣池、扣滑價與資金費率後，
 2H+4H 合併每筆 +0.094R、勝率約 54%、多單約 +0.01R、空單約 +0.18R。
 降級提醒（只通知，不自動減碼；2026-10-20 Denny 決定維加斯不設持倉上限和回撤煞車）：
-實盤滿 100 筆後每筆平均比回測低 2 個標準誤以上。
+實盤滿 100 筆、且至少 30 個平倉日後，每筆平均比回測低 2 個標準誤以上。
+標準誤按「平倉日」分群（同一天的單是同一個行情，不當成獨立樣本；2026-11-02 Denny 同意）。
 """
 
 from __future__ import annotations
@@ -25,6 +26,8 @@ FEED = "https://dennyhty.github.io/grid-trading/data/trader.json"
 BASELINE_R = 0.094  # 誠實版回測，扣成本後每筆
 BASELINE_WIN = 0.54
 STALE_MIN = 45  # 紀錄超過這麼久沒更新就提醒（trader 每個 K 線收盤才更新）
+DEMOTE_MIN_TRADES = 100
+DEMOTE_MIN_DAYS = 30  # 分群太少時群集標準誤不可靠
 WINDOWS = {"day": 1, "week": 7, "month": 30, "all": None}
 
 
@@ -34,6 +37,20 @@ def load(path: str | None) -> dict:
             return json.load(f)
     with urllib.request.urlopen(FEED, timeout=30) as r:
         return json.load(r)
+
+
+def day_cluster_se(rows: list[dict]) -> tuple[float, int]:
+    """每筆平均 R 的標準誤，按平倉日（UTC）分群；回傳（標準誤, 平倉日數）。"""
+    days: dict[int, list[float]] = {}
+    for x in rows:
+        days.setdefault(int(x["closed"] // 86_400_000), []).append(x["r"])
+    n = sum(len(v) for v in days.values())
+    if len(days) < 2:
+        return float("nan"), len(days)
+    mean = sum(sum(v) for v in days.values()) / n
+    ss = sum((sum(v) - mean * len(v)) ** 2 for v in days.values())
+    k = len(days)
+    return math.sqrt(ss * k / (k - 1)) / n, k
 
 
 def stats(rows: list[dict]) -> dict:
@@ -46,6 +63,7 @@ def stats(rows: list[dict]) -> dict:
     sd = math.sqrt(sum((v - mean) ** 2 for v in r) / (n - 1)) if n > 1 else float("nan")
     out = {"trades": n, "win_rate": sum(v > 0 for v in r) / n, "mean_r": mean, "sum_r": sum(r),
            "pnl_usdt": sum(x.get("pnl", 0.0) for x in rows), "se": sd / math.sqrt(n) if n > 1 else float("nan")}
+    out["se_day"], out["days"] = day_cluster_se(rows)
     for side in ("LONG", "SHORT"):
         sub = [x["r"] for x in rows if x["side"] == side]
         out[side.lower()] = {"trades": len(sub), "mean_r": sum(sub) / len(sub) if sub else float("nan")}
@@ -72,8 +90,10 @@ def build(feed: dict, window: str, now_ms: float | None = None) -> dict:
             notes.append(f"紀錄已 {age_min:.0f} 分鐘沒更新（trader 可能停了）")
         if b.get("paused"):
             notes.append("開新倉已暫停（pause 檔存在）")
-        if allst["trades"] >= 100 and not math.isnan(allst["se"]) and allst["mean_r"] < BASELINE_R - 2 * allst["se"]:
-            notes.append(f"累積 {allst['trades']} 筆每筆 {allst['mean_r']:+.3f}R，比回測 {BASELINE_R:+.3f}R 低超過 2 個標準誤（降級提醒，只通知）")
+        if (allst["trades"] >= DEMOTE_MIN_TRADES and allst["days"] >= DEMOTE_MIN_DAYS and not math.isnan(allst["se_day"])
+                and allst["mean_r"] < BASELINE_R - 2 * allst["se_day"]):
+            notes.append(f"累積 {allst['trades']} 筆（{allst['days']} 個平倉日）每筆 {allst['mean_r']:+.3f}R，"
+                         f"比回測 {BASELINE_R:+.3f}R 低超過 2 個標準誤（按日分群，降級提醒，只通知）")
         books[name] = {"window": stats(rows), "all_time": allst, "open_positions": len(b.get("positions", [])),
                        "open": [{k: p.get(k) for k in ("symbol", "interval", "side", "entry", "stop", "tps_hit", "unrealized_r", "unrealized_pnl") if k in p}
                                 for p in b.get("positions", [])],
@@ -93,7 +113,7 @@ def to_md(rep: dict) -> str:
         else:
             lines.append("- 期間：沒有已平倉的單")
         if a["trades"]:
-            se = f"，標準誤 {a['se']:.3f}" if not math.isnan(a["se"]) else ""
+            se = f"，標準誤 {a['se']:.3f}（按日分群 {a['se_day']:.3f}，{a['days']} 個平倉日）" if not math.isnan(a["se_day"]) else ""
             lines.append(f"- 累積：{a['trades']} 筆，勝率 {a['win_rate']:.0%}，每筆 {a['mean_r']:+.3f}R{se}，合計 {a['sum_r']:+.2f}R")
         lines.append(f"- 目前持倉 {b['open_positions']} 張")
         for n in b["notes"]:
