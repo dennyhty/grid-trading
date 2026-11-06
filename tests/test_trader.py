@@ -461,6 +461,30 @@ def test_binance_client_clean_id():
     assert len(clean_id("a" * 50)) == 36 and clean_id(None) is None
 
 
+def test_binance_client_never_sleeps_for_hours_on_ip_ban(monkeypatch):
+    """418 帶 Retry-After 幾小時時，不能真的睡幾小時（單執行緒迴圈會整個停擺、日誌一行都沒有）。"""
+    from grid_trading.trader import binance as bmod
+
+    class Resp:
+        status_code = 418
+        headers = {"Retry-After": "10800"}
+        text = "banned"
+
+        def json(self):
+            return {"code": -1003, "msg": "banned"}
+
+    class Sess:
+        def request(self, *a, **k):
+            return Resp()
+
+    waits = []
+    monkeypatch.setattr(bmod.time, "sleep", waits.append)
+    cli = bmod.BinanceFutures(session=Sess())
+    with pytest.raises(bmod.BinanceError):
+        cli.exchange_info()
+    assert waits and max(waits) <= bmod.MAX_WAIT, waits
+
+
 def test_stop_quantity_above_live_position_is_capped_and_reported(tmp_path):
     ex = FakeExchange(price=100.0, df=candles([(101, 99, 100)] * 3))
     tr, sink = make_trader(tmp_path, LiveBroker(ex, ex, Config()), ex)
