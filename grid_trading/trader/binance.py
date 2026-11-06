@@ -42,12 +42,16 @@ class BinanceFutures:
         self.key, self.secret = key, secret
         self.timeout = timeout
         self.session = session or requests.Session()
+        self.banned_until = 0.0   # 418（被封）時，到這個時間為止不再送需要簽名的請求
         self._offset = 0  # 本機時間和幣安伺服器時間的差（毫秒），簽名用
 
     # ---------- 底層 ----------
     def _request(self, method: str, path: str, params: dict | None = None, signed: bool = False, tries: int = 3):
         params = {k: v for k, v in (params or {}).items() if v is not None}
         headers = {}
+        if signed and time.time() < self.banned_until:
+            # 被封期間再送請求只會把封鎖拉長，直接失敗，讓上層記一行就好
+            raise BinanceError(418, -1003, f"被幣安暫時封鎖，{self.banned_until - time.time():.0f} 秒後才會再送請求")
         for i in range(tries):
             q = dict(params)
             if signed:
@@ -65,7 +69,17 @@ class BinanceFutures:
                     raise
                 time.sleep(2 ** i)
                 continue
-            if resp.status_code in (418, 429) or resp.status_code >= 500:
+            if resp.status_code == 418:
+                raw = resp.headers.get("Retry-After")
+                try:
+                    ban = float(raw)
+                except (TypeError, ValueError):
+                    ban = 120.0
+                self.banned_until = time.time() + ban
+                until = time.strftime("%H:%M", time.gmtime(self.banned_until))
+                print(f"幣安回 418（{path}），Retry-After={raw}，暫停送簽名請求到 {until} UTC", flush=True)
+                raise BinanceError(418, -1003, f"被幣安暫時封鎖到 {until} UTC")
+            if resp.status_code == 429 or resp.status_code >= 500:
                 if i < tries - 1:  # 被限流或幣安自己出錯，等一下再試
                     # Retry-After 可能是幾小時（418 封 IP）；整個交易迴圈只有一條執行緒，
                     # 睡下去就整個停擺且日誌沒有任何一行，所以最多等 MAX_WAIT 秒，之後照常往外丟錯誤。
