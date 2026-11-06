@@ -7,11 +7,6 @@ on:
   schedule:
     - cron: "2,17,32,47 * * * *"   # 備用；實際由「訊號定時器」在收盤前 75 秒觸發（GitHub 排程常延遲或不觸發）
   workflow_dispatch:
-    inputs:
-      test_telegram:
-        description: "傳一則 Telegram 測試訊息"
-        type: boolean
-        default: false
   push:
     branches: [main, claude/project-thread-t012rc]
     paths: ["web/**", "reports/**", "grid_trading/**", "signal_*.py", "stats/**", ".github/workflows/pages.yml"]
@@ -56,13 +51,9 @@ jobs:
           r=$(( $(date +%s) % 900 ))   # 距離上一個 :00/:15/:30/:45 幾秒
           if [ "$r" -ge 720 ]; then wait=$(( 900 - r + 15 )); elif [ "$r" -lt 15 ]; then wait=$(( 15 - r )); else wait=0; fi
           echo "等 $wait 秒到收盤後 15 秒"; sleep "$wait"
-      # 2H / 4H 剛收盤時，先只掃加密貨幣的實盤策略、馬上推 Telegram（約收盤後 1 分鐘），
-      # 再做完整掃描、圖表、部署；完整的 outbox 會跳過已經送過的
+      # 網站不再推 Telegram（2026-11-06 起只留幣安測試網交易程式的訊息）
       - name: 掃描訊號、產生網站
-        run: python signal_snapshot.py --out site --previous previous_notifications.json --ledger previous_ledger.json --previous-state previous_state.json --early-push early_sent.json
-        env:
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python signal_snapshot.py --out site --previous previous_notifications.json --ledger previous_ledger.json --previous-state previous_state.json
       # 幣安自動交易（VPS 上的 deploy/trader_feed.py）的紀錄，給網站的「績效」頁。
       # 沒設 TRADER_FEED_URL 或 VPS 連不上，就沿用目前網站上的那一份，不影響訊號部署。
       - name: 取得幣安自動交易紀錄
@@ -80,16 +71,9 @@ jobs:
             echo '{"books":{}}' > trader_new.json; echo "還沒有自動交易紀錄"
           fi
           mv trader_new.json site/data/trader.json
-      - name: 整理要推到 Telegram 的新通知
-        run: python signal_telegram.py outbox site/data previous_notifications.json outbox.json early_sent.json
       - uses: actions/upload-pages-artifact@v3
         with:
           path: site
-      - uses: actions/upload-artifact@v4
-        with:
-          name: telegram-outbox
-          path: outbox.json
-          retention-days: 1
 
   deploy:
     needs: build
@@ -103,27 +87,6 @@ jobs:
     steps:
       - id: deployment
         uses: actions/deploy-pages@v4
-
-  # 網站部署成功後才推 Telegram，免得部署失敗時下一次重送。
-  # Bot Token 和 Chat ID 放在 Settings → Secrets and variables → Actions，沒設定就跳過。
-  telegram:
-    needs: deploy
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          sparse-checkout: signal_telegram.py
-          sparse-checkout-cone-mode: false
-      - uses: actions/download-artifact@v4
-        with:
-          name: telegram-outbox
-      - run: python3 signal_telegram.py send outbox.json
-        env:
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          TELEGRAM_TEST: ${{ inputs.test_telegram }}
- 
 
   # 訊號定時器的機器偶爾會中途斷掉（例如 2026-10-15 00:38 UTC），接力就斷了，只剩這裡很稀疏的備用排程。
   # 備用排程每次觸發時檢查一下：沒有定時器在跑就重開一個。

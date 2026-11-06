@@ -53,7 +53,10 @@ def main(argv: list[str]) -> int:
         venue.sync_time()
         broker = LiveBroker(venue, data, cfg)
     filters = parse_filters(venue.exchange_info())
-    notify = Notifier(LABEL[a.mode], os.environ.get("TELEGRAM_BOT_TOKEN", ""), os.environ.get("TELEGRAM_CHAT_ID", ""))
+    # Telegram 只推測試網和實盤的訊息；紙上交易只寫紀錄（Denny 2026-11-06）
+    tg = a.mode != "paper"
+    notify = Notifier(LABEL[a.mode], os.environ.get("TELEGRAM_BOT_TOKEN", "") if tg else "",
+                      os.environ.get("TELEGRAM_CHAT_ID", "") if tg else "")
     Trader(cfg, data, broker, notify, filters).run(once=a.once)
     return 0
 
