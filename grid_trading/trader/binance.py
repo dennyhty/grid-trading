@@ -26,6 +26,9 @@ def clean_id(client_id: str | None) -> str | None:
     return None if client_id is None else re.sub(r"[^.A-Za-z0-9:/_-]", "_", client_id)[:36]
 
 
+MAX_WAIT = 30   # 被限流時單次最多等幾秒
+
+
 class BinanceError(RuntimeError):
     def __init__(self, status: int, code, msg: str):
         super().__init__(f"HTTP {status} code={code} {msg}")
@@ -64,7 +67,15 @@ class BinanceFutures:
                 continue
             if resp.status_code in (418, 429) or resp.status_code >= 500:
                 if i < tries - 1:  # 被限流或幣安自己出錯，等一下再試
-                    time.sleep(float(resp.headers.get("Retry-After", 2 ** (i + 1))))
+                    # Retry-After 可能是幾小時（418 封 IP）；整個交易迴圈只有一條執行緒，
+                    # 睡下去就整個停擺且日誌沒有任何一行，所以最多等 MAX_WAIT 秒，之後照常往外丟錯誤。
+                    try:
+                        wait = float(resp.headers.get("Retry-After", 2 ** (i + 1)))
+                    except ValueError:
+                        wait = 2 ** (i + 1)
+                    wait = min(wait, MAX_WAIT)
+                    print(f"幣安回 {resp.status_code}（{path}），{wait:.0f} 秒後重試", flush=True)
+                    time.sleep(wait)
                     continue
             try:
                 data = resp.json()
