@@ -195,7 +195,11 @@ class Trader:
             self.notify(f"{head}，不做：{reason}")
             return
         mult = risk_multiplier(self.store.ledger, self.cfg.rules)
-        equity = self.broker.equity(self.store)
+        try:
+            equity = self.broker.equity(self.store)
+        except Exception as e:  # 讀不到餘額也不能讓整輪掃描中斷（沒存「已處理」會每 30 秒重掃一次）
+            self.notify(f"{head}，不做：讀不到帳戶餘額（{e}）")
+            return
         size, why = plan_size(equity, self.cfg.risk * mult, sig.price, sig.sl, self.filters[sig.symbol],
                               tuple(sig.exit.get("portions") or (0.25, 0.25, 0.25)), self.cfg.max_risk)
         if size is None:
@@ -227,6 +231,9 @@ class Trader:
             try:
                 result = self.broker.manage(pos, now, self.notify)
             except Exception as e:
+                if isinstance(e, BinanceError) and e.status == 418:  # 被封：其餘持倉也一樣會失敗，這輪就到這裡
+                    print(f"持倉管理暫停：{e}", flush=True)
+                    return
                 msg = f"{_pair(pos['symbol'])} {pos['interval']} 管理失敗：{e}"
                 if isinstance(e, BinanceError):
                     msg += f"（程式記錄剩 {pos.get('remaining'):g}，止損 {pos.get('stop'):.6g}）"

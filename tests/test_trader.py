@@ -461,25 +461,44 @@ def test_binance_client_clean_id():
     assert len(clean_id("a" * 50)) == 36 and clean_id(None) is None
 
 
-def test_binance_client_never_sleeps_for_hours_on_ip_ban(monkeypatch):
-    """418 帶 Retry-After 幾小時時，不能真的睡幾小時（單執行緒迴圈會整個停擺、日誌一行都沒有）。"""
+def _client_with(status, retry_after, monkeypatch):
     from grid_trading.trader import binance as bmod
 
     class Resp:
-        status_code = 418
-        headers = {"Retry-After": "10800"}
-        text = "banned"
+        headers = {"Retry-After": retry_after}
+        text = "x"
+
+        def __init__(self):
+            self.status_code = status
 
         def json(self):
-            return {"code": -1003, "msg": "banned"}
+            return {"code": -1003, "msg": "x"}
 
     class Sess:
+        calls = 0
+
         def request(self, *a, **k):
+            Sess.calls += 1
             return Resp()
 
     waits = []
     monkeypatch.setattr(bmod.time, "sleep", waits.append)
-    cli = bmod.BinanceFutures(session=Sess())
+    return bmod, bmod.BinanceFutures(key="k", secret="s", session=Sess()), Sess, waits
+
+
+def test_binance_client_418_fails_fast_and_stops_sending_while_banned(monkeypatch):
+    """418 帶 Retry-After 幾小時：不睡（單執行緒迴圈會整個停擺、日誌沒有一行），也不在封鎖期間繼續送簽名請求。"""
+    bmod, cli, sess, waits = _client_with(418, "10800", monkeypatch)
+    with pytest.raises(bmod.BinanceError):
+        cli.open_conditionals("BTCUSDT")
+    assert sess.calls == 1 and not waits
+    with pytest.raises(bmod.BinanceError) as e:
+        cli.positions()
+    assert e.value.status == 418 and sess.calls == 1   # 封鎖期間沒有再送出去
+
+
+def test_binance_client_429_waits_at_most_max_wait(monkeypatch):
+    bmod, cli, sess, waits = _client_with(429, "10800", monkeypatch)
     with pytest.raises(bmod.BinanceError):
         cli.exchange_info()
     assert waits and max(waits) <= bmod.MAX_WAIT, waits
