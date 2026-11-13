@@ -11,7 +11,7 @@
 
 - paper：PaperBroker 直接用 tracker 算結果，和回測完全一致，只記帳。
 - testnet / live：LiveBroker 開倉後馬上在交易所掛止損（這張單的數量）和三個止盈（各 1/4），
-  之後每分鐘查各條件單的狀態判斷哪個 TP 成交了，再移動止損。程式停了，交易所上的止損還在。
+  之後每分鐘（--poll）查各條件單的狀態判斷哪個 TP 成交了，再移動止損。程式停了，交易所上的止損還在。
   價位以實際成交價為準（止損距離照訊號的比例），所以 1R 的大小和訊號一致。
 """
 
@@ -54,6 +54,9 @@ class Config:
     state_dir: Path = Path("trader_state")
     coins: list[str] = field(default_factory=lambda: list(TOP100))
     bars: int = 1000
+    poll: float = 60.0         # 持倉管理多久看一次（秒）；止損、止盈掛在交易所，這裡只負責追蹤和記帳
+    scan_delay: float = 15.0   # 收盤後等幾秒再掃描（紙上和測試網錯開，免得同一秒打光 IP 的額度）
+    paper_check: float = 300.0  # 紙上交易每張單多久重算一次（用的是 K 線，晚一點算結果一樣）
 
 
 def bar_close(now: pd.Timestamp, interval: str) -> pd.Timestamp:
@@ -256,7 +259,8 @@ class Trader:
                             f"{result:+.4f} USDT（{r:+.2f}R），累計 {cum:+.2f}R")
             self.store.save()
 
-    def run(self, poll: float = 30, once: bool = False) -> None:
+    def run(self, poll: float | None = None, once: bool = False) -> None:
+        poll = self.cfg.poll if poll is None else poll
         self.notify(f"啟動：{len(self.symbols)} 個幣，持倉 {len(self.store.positions)} 張")
         try:
             self.broker.reconcile(self.store, self.notify)
@@ -266,8 +270,8 @@ class Trader:
         while True:
             now = pd.Timestamp.now(tz="UTC")
             try:
-                # 收盤後等 15 秒再抓 K 線，幣安的最後一根才會是完整的
-                if (now - bar_close(now, "2H")) >= pd.Timedelta(seconds=15):
+                # 收盤後等一下再抓 K 線，幣安的最後一根才會是完整的
+                if (now - bar_close(now, "2H")) >= pd.Timedelta(seconds=self.cfg.scan_delay):
                     self.step_entries(now)
                 self.step_manage(now)
             except Exception as e:  # 網路斷線之類，下一輪再試
@@ -303,6 +307,9 @@ class PaperBroker:
                 "opened": int(sig.time.timestamp() * 1000)}
 
     def manage(self, pos: dict, now: pd.Timestamp, notify) -> float | None:
+        if now.timestamp() - pos.get("checked", 0) < self.cfg.paper_check:
+            return None  # 用 K 線重算，隔幾分鐘算結果一樣，不必每輪都抓
+        pos["checked"] = now.timestamp()
         sig = signal_from(pos["signal"])
         df = self.data.klines(sig.symbol, sig.interval, MAX_BARS + 20)
         res = track(sig, df[df["time"] <= now], self.cfg.fee, MAX_BARS)
@@ -336,18 +343,20 @@ class LiveBroker:
 
     def __init__(self, client: BinanceFutures, data: BinanceFutures, cfg: Config):
         self.client, self.data, self.cfg = client, data, cfg
-        self._open: dict[str, set] = {}
+        self._open: dict[str, set] | None = None
 
     def equity(self, store: Store) -> float:
         return self.client.balance_usdt()
 
     def begin_step(self) -> None:
-        self._open = {}  # 每輪重抓各幣的掛單（同一個幣只抓一次）
+        self._open = None  # 每輪重抓一次掛單（所有幣一次抓完，不是每個幣打一個請求）
 
     def open_ids(self, symbol: str) -> set:
-        if symbol not in self._open:
-            self._open[symbol] = {o.get("algoId") for o in self.client.open_conditionals(symbol)}
-        return self._open[symbol]
+        if self._open is None:
+            self._open = {}
+            for o in self.client.open_conditionals():
+                self._open.setdefault(o.get("symbol"), set()).add(o.get("algoId"))
+        return self._open.setdefault(symbol, set())
 
     def status(self, pos: dict, oid) -> tuple[str, float]:
         """條件單的狀態：("open" / "filled" / "pending" / "gone", 成交價)。
@@ -475,8 +484,8 @@ class LiveBroker:
             r = self.client.conditional_order(pos["symbol"], pos["close_side"], pos["side"], "STOP_MARKET",
                                               fmt(price, pos["tick"]), quantity=fmt(live, pos["step"]),
                                               client_id=f"{pos['tag']}s{version}c")
-        if pos["symbol"] in getattr(self, "_open", {}):
-            self._open[pos["symbol"]].add(r.get("algoId"))  # 這一輪的掛單快取也要有新止損
+        if self._open is not None:
+            self._open.setdefault(pos["symbol"], set()).add(r.get("algoId"))  # 這一輪的掛單快取也要有新止損
         return r.get("algoId")
 
     def _close_rest(self, pos: dict, reason: str) -> None:

@@ -83,6 +83,7 @@ class FakeExchange:
         self.fail_stop = False
         self.done = {}
         self.client_ids = set()
+        self.open_calls = 0
 
     # 行情
     def klines(self, symbol, interval, limit=500):
@@ -145,8 +146,9 @@ class FakeExchange:
         o = self.done[oid]
         return {"algoStatus": o["algoStatus"], "triggerPrice": str(o["trigger"]), "actualPrice": "0"}
 
-    def open_conditionals(self, symbol):
-        return [o for o in self.algo.values() if o["symbol"] == symbol]
+    def open_conditionals(self, symbol=None):
+        self.open_calls += 1
+        return [o for o in self.algo.values() if symbol is None or o["symbol"] == symbol]
 
     def realized_since(self, symbol, ps, start):
         return self.pnl
@@ -536,3 +538,42 @@ def test_startup_survives_position_that_is_already_flat_on_exchange(tmp_path):
     tr.step_manage(T0 + pd.Timedelta(minutes=30))
     assert pid not in tr.store.positions and len(tr.store.ledger) == 1
     assert any("已經沒有這個倉位" in m for m in sink), sink
+
+
+def test_manage_reads_all_open_orders_once_per_poll(tmp_path):
+    import dataclasses
+    ex = FakeExchange(price=100.0, df=candles([(101, 99, 100)] * 3))
+    tr, sink = make_trader(tmp_path, LiveBroker(ex, ex, Config()), ex)
+    for sym in ("YUSDT", "ZUSDT"):
+        tr.filters[sym] = F
+    sig = make_signal()
+    for sym in ("XUSDT", "YUSDT", "ZUSDT"):
+        tr.try_open(dataclasses.replace(sig, symbol=sym))
+    assert len(tr.store.positions) == 3, sink
+    ex.open_calls = 0
+    tr.step_manage(T0 + pd.Timedelta(minutes=30))
+    assert ex.open_calls == 1   # 三個幣、一個請求
+
+
+def test_paper_manage_skips_recheck_within_interval(tmp_path):
+    sink = []
+    df = candles([(101, 99, 100)] * 3)
+    cfg = Config(mode="paper", state_dir=tmp_path, coins=["X"])
+    calls = []
+
+    class Data:
+        def klines(self, symbol, interval, limit=500):
+            calls.append(1)
+            return df
+
+        def price(self, symbol):
+            return 100.0
+
+    tr = Trader(cfg, Data(), PaperBroker(Data(), cfg), Notifier("test", sink=sink), {"XUSDT": F})
+    tr.try_open(make_signal())
+    now = T0 + pd.Timedelta(minutes=30)
+    tr.step_manage(now)
+    tr.step_manage(now + pd.Timedelta(seconds=60))
+    assert len(calls) == 1
+    tr.step_manage(now + pd.Timedelta(seconds=cfg.paper_check + 1))
+    assert len(calls) == 2
