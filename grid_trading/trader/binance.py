@@ -188,7 +188,8 @@ class BinanceFutures:
         """查一張條件單（含已觸發、已取消的）；algoStatus 是 TRIGGERED / FINISHED 表示已成交。"""
         return self._request("GET", "/fapi/v1/algoOrder", {"algoId": algo_id}, signed=True)
 
-    def open_conditionals(self, symbol: str) -> list[dict]:
+    def open_conditionals(self, symbol: str | None = None) -> list[dict]:
+        """掛著的條件單。不給 symbol 就一次列出所有幣（權重 40，單一幣是 1）：幣多時一個請求比每個幣各打一次省得多。"""
         data = self._request("GET", "/fapi/v1/openAlgoOrders", {"symbol": symbol}, signed=True)
         return data if isinstance(data, list) else data.get("orders", [])
 

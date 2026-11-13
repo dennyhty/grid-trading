@@ -32,6 +32,9 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--dd-half-r", type=float, default=None)
     ap.add_argument("--paper-equity", type=float, default=100.0)
     ap.add_argument("--state-dir", type=Path, default=Path("trader_state"))
+    ap.add_argument("--poll", type=float, default=60.0, help="持倉管理幾秒看一次（預設 60）")
+    ap.add_argument("--scan-delay", type=float, default=None,
+                    help="收盤後幾秒再掃描（預設：測試網、正式 15 秒，紙上 75 秒，和測試網錯開）")
     ap.add_argument("--once", action="store_true", help="只跑一輪（測試用）")
     a = ap.parse_args(argv)
 
@@ -39,7 +42,8 @@ def main(argv: list[str]) -> int:
         print("正式帳戶要先設 TRADER_ALLOW_LIVE=1（請先在測試網跑過）", file=sys.stderr)
         return 2
     cfg = Config(mode=a.mode, risk=a.risk, max_risk=a.max_risk, leverage=a.leverage, paper_equity=a.paper_equity,
-                 rules=RiskRules(max_open=a.max_open, dd_half_r=a.dd_half_r), state_dir=a.state_dir)
+                 rules=RiskRules(max_open=a.max_open, dd_half_r=a.dd_half_r), state_dir=a.state_dir,
+                 poll=a.poll, scan_delay=(75.0 if a.mode == "paper" else 15.0) if a.scan_delay is None else a.scan_delay)
     data = BinanceFutures(MAINNET)
     if a.mode == "paper":
         venue = data
